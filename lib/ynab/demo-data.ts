@@ -107,6 +107,13 @@ export const DEMO_CATEGORY_GROUPS: CategoryGroup[] = [
     hidden: false,
     deleted: false,
   },
+  {
+    id: "group-income",
+    plan_id: DEMO_PLAN_ID,
+    name: "Income & Inflows",
+    hidden: false,
+    deleted: false,
+  },
 ];
 
 export const DEMO_CATEGORIES: Category[] = [
@@ -234,6 +241,31 @@ export const DEMO_CATEGORIES: Category[] = [
     activity: -115000, // -$115.00 flight deposit
     balance: 185000, // $185.00 remaining
   },
+  // Income & Inflows
+  {
+    id: "cat-inflow",
+    plan_id: DEMO_PLAN_ID,
+    category_group_id: "group-income",
+    category_group_name: "Income & Inflows",
+    name: "Inflow: Ready to Assign",
+    hidden: false,
+    deleted: false,
+    budgeted: 0,
+    activity: 3450000, // +$3,450.00
+    balance: 3450000,
+  },
+  {
+    id: "cat-side-income",
+    plan_id: DEMO_PLAN_ID,
+    category_group_id: "group-income",
+    category_group_name: "Income & Inflows",
+    name: "Freelance & Consulting",
+    hidden: false,
+    deleted: false,
+    budgeted: 0,
+    activity: 750000, // +$750.00
+    balance: 750000,
+  },
 ];
 
 export const DEMO_TRANSACTIONS: TransactionDetail[] = [
@@ -353,7 +385,7 @@ export const DEMO_TRANSACTIONS: TransactionDetail[] = [
     account_id: "acc-checking-1",
     account_name: "Chase Total Checking",
     payee_name: "Acme Corp Payroll",
-    category_id: null,
+    category_id: "cat-inflow",
     category_name: "Inflow: Ready to Assign",
     deleted: false,
   },
@@ -469,6 +501,21 @@ export const DEMO_TRANSACTIONS: TransactionDetail[] = [
     category_id: null,
     category_name: null,
     debt_transaction_type: "balanceAdjustment",
+    deleted: false,
+  },
+  {
+    id: "tx-16",
+    plan_id: DEMO_PLAN_ID,
+    date: new Date(Date.now() - 86400000 * 3).toISOString().slice(0, 10),
+    amount: 750000, // +$750.00
+    memo: "Q3 Website consulting project payment",
+    cleared: "cleared",
+    approved: true,
+    account_id: "acc-checking-1",
+    account_name: "Chase Total Checking",
+    payee_name: "Apex Design Studio",
+    category_id: "cat-side-income",
+    category_name: "Freelance & Consulting",
     deleted: false,
   },
 ];

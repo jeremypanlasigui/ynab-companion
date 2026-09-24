@@ -41,7 +41,12 @@ import {
   Wand2,
   Equal,
   Scale,
+  TrendingUp,
+  Wallet,
+  Coins,
+  Building2,
 } from "lucide-react";
+import { ConfigureIncomeCategoriesModal } from "@/components/ynab/ConfigureIncomeCategoriesModal";
 
 interface CategorySpendingSummary {
   categoryId: string;
@@ -82,6 +87,43 @@ interface BalanceAdjustmentItem {
   payeeName: string;
   memo?: string | null;
   cleared?: string;
+}
+
+interface IncomeTransactionItem {
+  id: string;
+  date: string;
+  amount: number; // positive milliunits
+  payeeName: string;
+  accountName: string;
+  categoryId?: string;
+  categoryName?: string;
+  memo?: string | null;
+  cleared?: string;
+}
+
+interface IncomeCategoryBreakdown {
+  categoryId: string;
+  categoryName: string;
+  categoryGroupName?: string | null;
+  totalIncome: number; // positive milliunits
+  percentageOfTotal: number;
+  transactionCount: number;
+  transactions: IncomeTransactionItem[];
+}
+
+interface IncomePayeeContribution {
+  categoryId: string;
+  categoryName: string;
+  amount: number;
+}
+
+interface IncomePayeeBreakdown {
+  payeeName: string;
+  totalIncome: number; // positive milliunits
+  percentageOfTotal: number;
+  transactionCount: number;
+  categories: IncomePayeeContribution[];
+  transactions: IncomeTransactionItem[];
 }
 
 // Consistent modern color palette for matching category colors between reality and budget charts
@@ -134,6 +176,52 @@ export default function BudgetsV2Page() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [inlineEditCatId, setInlineEditCatId] = useState<string | null>(null);
   const [inlineAmountStr, setInlineAmountStr] = useState<string>("");
+
+  // Income configuration states
+  const [selectedIncomeCategoryIds, setSelectedIncomeCategoryIds] = useState<Set<string>>(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(`ynab_income_categories_${activePlanId}`);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return new Set(parsed);
+          }
+        } catch {}
+      }
+    }
+    return new Set(["cat-inflow", "cat-side-income", "inflow:ready-to-assign"]);
+  });
+
+  const [isIncomeConfigOpen, setIsIncomeConfigOpen] = useState(false);
+  const [expandedIncomeCatId, setExpandedIncomeCatId] = useState<string | null>(null);
+  const [expandedIncomePayee, setExpandedIncomePayee] = useState<string | null>(null);
+  const [incomeBreakdownView, setIncomeBreakdownView] = useState<"both" | "category" | "payee">("both");
+
+  // Sync income categories when plan changes
+  useEffect(() => {
+    if (typeof window !== "undefined" && activePlanId) {
+      const stored = localStorage.getItem(`ynab_income_categories_${activePlanId}`);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setSelectedIncomeCategoryIds(new Set(parsed));
+          }
+        } catch {}
+      }
+    }
+  }, [activePlanId]);
+
+  const handleSaveIncomeCategories = (newSelected: Set<string>) => {
+    setSelectedIncomeCategoryIds(newSelected);
+    if (typeof window !== "undefined" && activePlanId) {
+      localStorage.setItem(
+        `ynab_income_categories_${activePlanId}`,
+        JSON.stringify(Array.from(newSelected))
+      );
+    }
+  };
 
   // Map of account ID to account Name for quick reference
   const accountsMap = useMemo(() => {
@@ -242,6 +330,12 @@ export default function BudgetsV2Page() {
     totalTransferred,
     balanceAdjustmentsList,
     totalAdjustmentsNet,
+    totalMonthIncome,
+    incomeCategoryBreakdown,
+    incomePayeeBreakdown,
+    netCashflow,
+    savingsRate,
+    categoryInflowMap,
     realitySlices,
     budgetSlices,
   } = useMemo(() => {
@@ -258,6 +352,31 @@ export default function BudgetsV2Page() {
       }
     >();
 
+    const incomeMap = new Map<
+      string,
+      {
+        categoryId: string;
+        categoryName: string;
+        categoryGroupName?: string | null;
+        totalIncome: number;
+        transactions: IncomeTransactionItem[];
+      }
+    >();
+
+    const categoryInflows = new Map<string, number>();
+
+    const isIncomeCat = (catId?: string | null, catName?: string | null) => {
+      if (catId && selectedIncomeCategoryIds.has(catId)) return true;
+      if (
+        (!catId || catId === "inflow:ready-to-assign" || catId === "cat-inflow") &&
+        catName?.toLowerCase().includes("ready to assign") &&
+        (selectedIncomeCategoryIds.has("inflow:ready-to-assign") || selectedIncomeCategoryIds.has("cat-inflow"))
+      ) {
+        return true;
+      }
+      return false;
+    };
+
     const transfers: AccountTransferItem[] = [];
     const balanceAdjustments: BalanceAdjustmentItem[] = [];
     const processedTransferIds = new Set<string>();
@@ -266,6 +385,16 @@ export default function BudgetsV2Page() {
     // 1. Process transactions
     for (const tx of rawTransactions) {
       if (tx.deleted) continue;
+
+      // Track inflow amounts for modal category badges
+      if (tx.amount > 0) {
+        const rawCatId =
+          tx.category_id ||
+          (tx.category_name?.toLowerCase().includes("ready to assign")
+            ? "inflow:ready-to-assign"
+            : "uncategorized");
+        categoryInflows.set(rawCatId, (categoryInflows.get(rawCatId) || 0) + tx.amount);
+      }
 
       // Balance adjustment detection (debt_transaction_type === 'balanceAdjustment' or reconciliation payee/memo)
       const isTxBalanceAdjustment = Boolean(
@@ -345,6 +474,15 @@ export default function BudgetsV2Page() {
         for (const sub of tx.subtransactions) {
           if (sub.deleted) continue;
 
+          if (sub.amount > 0) {
+            const rawCatId =
+              sub.category_id ||
+              (sub.payee_name?.toLowerCase().includes("ready to assign")
+                ? "inflow:ready-to-assign"
+                : "uncategorized");
+            categoryInflows.set(rawCatId, (categoryInflows.get(rawCatId) || 0) + sub.amount);
+          }
+
           // Check if subtransaction is a balance adjustment
           const isSubBalanceAdjustment = Boolean(
             (sub as any).debt_transaction_type === "balanceAdjustment" ||
@@ -410,6 +548,41 @@ export default function BudgetsV2Page() {
             continue;
           }
 
+          // Check if subtransaction is Income
+          if (isIncomeCat(sub.category_id, sub.payee_name || tx.category_name)) {
+            const resolvedCatId = sub.category_id || "inflow:ready-to-assign";
+            const catObj = categories.find((c) => c.id === resolvedCatId);
+            const resolvedCatName =
+              catObj?.name || sub.payee_name || tx.category_name || "Inflow: Ready to Assign";
+            const resolvedGroupName = catObj?.category_group_name || "Income & Inflows";
+
+            if (!incomeMap.has(resolvedCatId)) {
+              incomeMap.set(resolvedCatId, {
+                categoryId: resolvedCatId,
+                categoryName: resolvedCatName,
+                categoryGroupName: resolvedGroupName,
+                totalIncome: 0,
+                transactions: [],
+              });
+            }
+
+            const inc = incomeMap.get(resolvedCatId)!;
+            inc.totalIncome += sub.amount;
+            inc.transactions.push({
+              id: `${tx.id}-${sub.id}`,
+              date: tx.date,
+              amount: sub.amount,
+              payeeName: sub.payee_name || tx.payee_name || "Unknown Payee",
+              accountName: tx.account_name || accountsMap.get(tx.account_id) || "Account",
+              categoryId: resolvedCatId,
+              categoryName: resolvedCatName,
+              memo: sub.memo || tx.memo,
+              cleared: tx.cleared,
+            });
+
+            continue; // Exclude income subtransaction from expense spending
+          }
+
           spendingTxCount++;
           const catId = sub.category_id || "uncategorized";
           const catName = sub.category_name || "Uncategorized";
@@ -445,6 +618,41 @@ export default function BudgetsV2Page() {
           });
         }
       } else {
+        // Income transaction detection (category selected in income group)
+        if (isIncomeCat(tx.category_id, tx.category_name)) {
+          const resolvedCatId = tx.category_id || "inflow:ready-to-assign";
+          const catObj = categories.find((c) => c.id === resolvedCatId);
+          const resolvedCatName =
+            catObj?.name || tx.category_name || "Inflow: Ready to Assign";
+          const resolvedGroupName = catObj?.category_group_name || "Income & Inflows";
+
+          if (!incomeMap.has(resolvedCatId)) {
+            incomeMap.set(resolvedCatId, {
+              categoryId: resolvedCatId,
+              categoryName: resolvedCatName,
+              categoryGroupName: resolvedGroupName,
+              totalIncome: 0,
+              transactions: [],
+            });
+          }
+
+          const inc = incomeMap.get(resolvedCatId)!;
+          inc.totalIncome += tx.amount;
+          inc.transactions.push({
+            id: tx.id,
+            date: tx.date,
+            amount: tx.amount,
+            payeeName: tx.payee_name || "Unknown Payee",
+            accountName: tx.account_name || accountsMap.get(tx.account_id) || "Account",
+            categoryId: resolvedCatId,
+            categoryName: resolvedCatName,
+            memo: tx.memo,
+            cleared: tx.cleared,
+          });
+
+          continue; // Exclude income transactions from expense spending
+        }
+
         // Standard transaction
         spendingTxCount++;
         const catId = tx.category_id || "uncategorized";
@@ -566,7 +774,130 @@ export default function BudgetsV2Page() {
     balanceAdjustments.sort((a, b) => b.date.localeCompare(a.date));
     const totalAdjustmentsNet = balanceAdjustments.reduce((acc, c) => acc + c.amount, 0);
 
-    // 5. Generate pie chart slices for Reality and Budget
+    // 5. Aggregate Income Breakdown
+    // Include all categories configured as income, showing $0 if no deposits occurred
+    for (const catId of selectedIncomeCategoryIds) {
+      if (!incomeMap.has(catId)) {
+        const catObj = categories.find((c) => c.id === catId);
+        const name =
+          catObj?.name ||
+          (catId === "inflow:ready-to-assign" ? "Inflow: Ready to Assign" : "Income Category");
+        const group = catObj?.category_group_name || "Income & Inflows";
+        incomeMap.set(catId, {
+          categoryId: catId,
+          categoryName: name,
+          categoryGroupName: group,
+          totalIncome: 0,
+          transactions: [],
+        });
+      }
+    }
+
+    let totalMonthIncome = 0;
+    for (const item of incomeMap.values()) {
+      if (item.totalIncome > 0) {
+        totalMonthIncome += item.totalIncome;
+      }
+    }
+
+    const incomeCategoryBreakdown: IncomeCategoryBreakdown[] = [];
+    for (const item of incomeMap.values()) {
+      const percentage =
+        totalMonthIncome > 0
+          ? Math.round((Math.max(0, item.totalIncome) / totalMonthIncome) * 100)
+          : 0;
+
+      item.transactions.sort((a, b) => b.date.localeCompare(a.date));
+
+      incomeCategoryBreakdown.push({
+        categoryId: item.categoryId,
+        categoryName: item.categoryName,
+        categoryGroupName: item.categoryGroupName,
+        totalIncome: Math.max(0, item.totalIncome),
+        percentageOfTotal: percentage,
+        transactionCount: item.transactions.length,
+        transactions: item.transactions,
+      });
+    }
+
+    // Sort income categories: highest income first
+    incomeCategoryBreakdown.sort((a, b) => b.totalIncome - a.totalIncome);
+
+    // 6. Aggregate Income by Payee
+    const payeeMap = new Map<
+      string,
+      {
+        payeeName: string;
+        totalIncome: number;
+        categoryMap: Map<string, { categoryId: string; categoryName: string; amount: number }>;
+        transactions: IncomeTransactionItem[];
+      }
+    >();
+
+    for (const catItem of incomeMap.values()) {
+      for (const tx of catItem.transactions) {
+        const rawPayee = (tx.payeeName || "").trim();
+        const payeeKey = rawPayee || "Unspecified Payee";
+
+        if (!payeeMap.has(payeeKey)) {
+          payeeMap.set(payeeKey, {
+            payeeName: payeeKey,
+            totalIncome: 0,
+            categoryMap: new Map(),
+            transactions: [],
+          });
+        }
+
+        const p = payeeMap.get(payeeKey)!;
+        p.totalIncome += tx.amount;
+        p.transactions.push(tx);
+
+        const catKey = tx.categoryId || catItem.categoryId;
+        const catName = tx.categoryName || catItem.categoryName;
+        if (!p.categoryMap.has(catKey)) {
+          p.categoryMap.set(catKey, {
+            categoryId: catKey,
+            categoryName: catName,
+            amount: 0,
+          });
+        }
+        p.categoryMap.get(catKey)!.amount += tx.amount;
+      }
+    }
+
+    const incomePayeeBreakdown: IncomePayeeBreakdown[] = [];
+    for (const p of payeeMap.values()) {
+      const percentage =
+        totalMonthIncome > 0
+          ? Math.round((Math.max(0, p.totalIncome) / totalMonthIncome) * 100)
+          : 0;
+
+      p.transactions.sort((a, b) => b.date.localeCompare(a.date));
+
+      const catContributions = Array.from(p.categoryMap.values()).sort(
+        (a, b) => b.amount - a.amount
+      );
+
+      incomePayeeBreakdown.push({
+        payeeName: p.payeeName,
+        totalIncome: Math.max(0, p.totalIncome),
+        percentageOfTotal: percentage,
+        transactionCount: p.transactions.length,
+        categories: catContributions,
+        transactions: p.transactions,
+      });
+    }
+
+    // Sort income payees: highest income first
+    incomePayeeBreakdown.sort((a, b) => b.totalIncome - a.totalIncome);
+
+    const netCashflow = totalMonthIncome - totalSpentAll;
+    const savingsRate =
+      totalMonthIncome > 0
+        ? Math.round((netCashflow / totalMonthIncome) * 100)
+        : null;
+
+    // 7. Generate pie chart slices for Reality and Budget
     const realitySlices: PieChartSlice[] = combinedList
       .filter((c) => c.totalSpent > 0)
       .map((c) => ({
@@ -595,10 +926,23 @@ export default function BudgetsV2Page() {
       totalTransferred: totalTransferredVolume,
       balanceAdjustmentsList: balanceAdjustments,
       totalAdjustmentsNet,
+      totalMonthIncome,
+      incomeCategoryBreakdown,
+      incomePayeeBreakdown,
+      netCashflow,
+      savingsRate,
+      categoryInflowMap: categoryInflows,
       realitySlices,
       budgetSlices,
     };
-  }, [rawTransactions, accountsMap, localBudget, categories, categoryColorMap]);
+  }, [
+    rawTransactions,
+    accountsMap,
+    localBudget,
+    categories,
+    categoryColorMap,
+    selectedIncomeCategoryIds,
+  ]);
 
   // Filtered categories based on search
   const filteredCategories = useMemo(() => {
@@ -761,6 +1105,25 @@ export default function BudgetsV2Page() {
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Total Month Income */}
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-lg">
+          <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
+            <span>Total Month Income</span>
+            <TrendingUp className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="text-2xl font-extrabold text-emerald-400 mt-2 font-mono">
+            {formatCurrency(totalMonthIncome)}
+          </div>
+          <p className="text-[11px] text-zinc-500 mt-1">
+            {incomeCategoryBreakdown.reduce((acc, c) => acc + c.transactionCount, 0)} inflow{" "}
+            {incomeCategoryBreakdown.reduce((acc, c) => acc + c.transactionCount, 0) === 1
+              ? "deposit"
+              : "deposits"}{" "}
+            • {incomePayeeBreakdown.length}{" "}
+            {incomePayeeBreakdown.length === 1 ? "payee" : "payees"}
+          </p>
+        </div>
+
         {/* Total Spending */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-lg">
           <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
@@ -775,6 +1138,30 @@ export default function BudgetsV2Page() {
           </p>
         </div>
 
+        {/* Net Cash Flow */}
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-lg">
+          <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
+            <span>Net Cash Flow</span>
+            <Wallet
+              className={`w-4 h-4 ${
+                netCashflow >= 0 ? "text-emerald-400" : "text-rose-400"
+              }`}
+            />
+          </div>
+          <div
+            className={`text-2xl font-extrabold mt-2 font-mono ${
+              netCashflow >= 0 ? "text-emerald-400" : "text-rose-400"
+            }`}
+          >
+            {formatCurrency(netCashflow, { showSign: true })}
+          </div>
+          <p className="text-[11px] text-zinc-500 mt-1">
+            {savingsRate !== null
+              ? `${savingsRate}% savings rate`
+              : "Income minus spending"}
+          </p>
+        </div>
+
         {/* Total Budgeted */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-lg">
           <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
@@ -786,37 +1173,6 @@ export default function BudgetsV2Page() {
           </div>
           <p className="text-[11px] text-zinc-500 mt-1">
             Planned funds in local Budget
-          </p>
-        </div>
-
-        {/* Total Spending Transactions */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-lg">
-          <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
-            <span>Spending Transactions</span>
-            <Receipt className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="text-2xl font-extrabold text-white mt-2 font-mono">
-            {totalSpendingTxCount}
-          </div>
-          <p className="text-[11px] text-zinc-500 mt-1">
-            Excludes transfers &amp; adjustments
-          </p>
-        </div>
-
-        {/* Top Spending Category */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-lg">
-          <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
-            <span>Top Category</span>
-            <Tag className="w-4 h-4 text-purple-400" />
-          </div>
-          <div
-            className="text-lg font-bold text-white mt-2 truncate"
-            title={topCategory?.categoryName || "None"}
-          >
-            {topCategory?.categoryName || "None"}
-          </div>
-          <p className="text-[11px] text-zinc-400 mt-1 font-mono">
-            {topCategory ? formatCurrency(topCategory.totalSpent) : "$0.00"}
           </p>
         </div>
       </div>
@@ -854,6 +1210,506 @@ export default function BudgetsV2Page() {
             emptyMessage="No budget amounts defined for this month"
           />
         </div>
+      </div>
+
+      {/* Income Section (Custom Group of Selected Income Categories) */}
+      <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur-xs space-y-5">
+        {/* Section Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800/80">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-white tracking-tight">
+                  Income
+                </h2>
+                <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
+                  {selectedIncomeCategoryIds.size}{" "}
+                  {selectedIncomeCategoryIds.size === 1 ? "category configured" : "categories configured"}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Sum of all inflows across your configured income categories •{" "}
+                <span className="text-zinc-500">
+                  Separated from expense spending
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start sm:self-auto flex-wrap">
+            {/* Configure Categories Button */}
+            <button
+              type="button"
+              onClick={() => setIsIncomeConfigOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700/80 transition-colors shadow-xs"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Select Categories</span>
+            </button>
+
+            {/* Total Income Display */}
+            <div className="flex items-center gap-2 text-xs bg-zinc-900 px-3.5 py-1.5 rounded-xl border border-zinc-800 text-zinc-300">
+              <span className="text-zinc-500">Total Income:</span>
+              <span className="text-base font-extrabold text-emerald-400 font-mono">
+                {formatCurrency(totalMonthIncome)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Income Breakdown & Stats */}
+        {selectedIncomeCategoryIds.size === 0 ? (
+          <div className="text-center py-10 px-4 rounded-2xl border border-zinc-800/60 bg-zinc-950/30">
+            <TrendingUp className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+            <p className="text-xs font-semibold text-zinc-300">
+              No income categories configured
+            </p>
+            <p className="text-[11px] text-zinc-500 mt-1 max-w-sm mx-auto">
+              Select which categories should be summed up to equal your income (such as Salary, Inflow: Ready to Assign, Side Hustle, etc.).
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsIncomeConfigOpen(true)}
+              className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-zinc-950 transition-colors"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Configure Income Categories</span>
+            </button>
+          </div>
+        ) : incomeCategoryBreakdown.length === 0 ? (
+          <div className="text-center py-8 px-4 rounded-2xl border border-zinc-800/60 bg-zinc-950/30">
+            <Coins className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+            <p className="text-xs font-semibold text-zinc-300">
+              No income recorded for {formattedMonthLabel}
+            </p>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              No deposits or inflows found across your {selectedIncomeCategoryIds.size} configured income categories.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Cashflow Summary Ribbon */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-xl bg-zinc-950/40 border border-zinc-800/80">
+                <span className="text-[11px] text-zinc-400 font-medium block">
+                  Total Income Earned
+                </span>
+                <span className="text-lg font-extrabold text-emerald-400 font-mono mt-0.5 block">
+                  {formatCurrency(totalMonthIncome)}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-zinc-950/40 border border-zinc-800/80">
+                <span className="text-[11px] text-zinc-400 font-medium block">
+                  Net Cashflow (Income − Spending)
+                </span>
+                <span
+                  className={`text-lg font-extrabold font-mono mt-0.5 block ${
+                    netCashflow >= 0 ? "text-emerald-400" : "text-rose-400"
+                  }`}
+                >
+                  {formatCurrency(netCashflow, { showSign: true })}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-zinc-950/40 border border-zinc-800/80">
+                <span className="text-[11px] text-zinc-400 font-medium block">
+                  Savings Rate
+                </span>
+                <span className="text-lg font-extrabold text-teal-300 font-mono mt-0.5 block">
+                  {savingsRate !== null ? `${savingsRate}%` : "N/A"}
+                </span>
+              </div>
+            </div>
+
+            {/* Breakdown Controls / View Switcher */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+              <div className="flex items-center gap-1.5 p-1 rounded-xl bg-zinc-950/70 border border-zinc-800/80 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setIncomeBreakdownView("both")}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                    incomeBreakdownView === "both"
+                      ? "bg-zinc-800 text-white shadow-xs"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  Side-by-Side View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIncomeBreakdownView("category")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+                    incomeBreakdownView === "category"
+                      ? "bg-zinc-800 text-white shadow-xs"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <Tag className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>By Category</span>
+                  <span className="px-1.5 py-0.2 rounded-md bg-zinc-700/60 text-[10px] text-zinc-300">
+                    {incomeCategoryBreakdown.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIncomeBreakdownView("payee")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+                    incomeBreakdownView === "payee"
+                      ? "bg-zinc-800 text-white shadow-xs"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5 text-teal-400" />
+                  <span>By Payee</span>
+                  <span className="px-1.5 py-0.2 rounded-md bg-zinc-700/60 text-[10px] text-zinc-300">
+                    {incomePayeeBreakdown.length}
+                  </span>
+                </button>
+              </div>
+
+              <span className="text-xs text-zinc-400">
+                {incomePayeeBreakdown.length}{" "}
+                {incomePayeeBreakdown.length === 1 ? "income source" : "income sources"} •{" "}
+                {incomeCategoryBreakdown.reduce((acc, c) => acc + c.transactionCount, 0)}{" "}
+                total deposits
+              </span>
+            </div>
+
+            {/* Income Breakdowns Grid */}
+            <div
+              className={`grid gap-5 ${
+                incomeBreakdownView === "both"
+                  ? "grid-cols-1 lg:grid-cols-2"
+                  : "grid-cols-1"
+              }`}
+            >
+              {/* Category Breakdown Column */}
+              {(incomeBreakdownView === "both" || incomeBreakdownView === "category") && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800/60">
+                    <div className="flex items-center gap-2">
+                      <Tag className="w-3.5 h-3.5 text-emerald-400" />
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+                        Category Breakdown
+                      </h3>
+                    </div>
+                    <span className="text-[11px] text-zinc-500 font-mono">
+                      {incomeCategoryBreakdown.length}{" "}
+                      {incomeCategoryBreakdown.length === 1 ? "category" : "categories"}
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {incomeCategoryBreakdown.map((item) => {
+                      const isExpanded = expandedIncomeCatId === item.categoryId;
+
+                      return (
+                        <div
+                          key={item.categoryId}
+                          className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/70 hover:border-zinc-700/80 transition-all space-y-3"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            {/* Category Info */}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-bold text-white">
+                                  {item.categoryName}
+                                </span>
+                                {item.categoryGroupName && (
+                                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/60">
+                                    {item.categoryGroupName}
+                                  </span>
+                                )}
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
+                                  {item.percentageOfTotal}% of income
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-zinc-400">
+                                {item.transactionCount}{" "}
+                                {item.transactionCount === 1 ? "deposit" : "deposits"} recorded
+                              </p>
+                            </div>
+
+                            {/* Amount & Expand Toggle */}
+                            <div className="flex items-center justify-between sm:justify-end gap-3 sm:pl-4 sm:border-l sm:border-zinc-800">
+                              <div className="text-right">
+                                <div className="text-lg font-extrabold text-emerald-400 font-mono">
+                                  +{formatCurrency(item.totalIncome)}
+                                </div>
+                                <span className="text-[10px] text-zinc-500 block">
+                                  Net Income
+                                </span>
+                              </div>
+
+                              {item.transactions.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedIncomeCatId(isExpanded ? null : item.categoryId)
+                                  }
+                                  className="p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors"
+                                  title={isExpanded ? "Collapse transactions" : "View transactions"}
+                                >
+                                  {isExpanded ? (
+                                    <ChevronUp className="w-4 h-4" />
+                                  ) : (
+                                    <ChevronDown className="w-4 h-4" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Progress Bar for Share of Income */}
+                          <div className="w-full">
+                            <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300"
+                                style={{ width: `${Math.min(100, item.percentageOfTotal)}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Expanded Transactions List */}
+                          {isExpanded && item.transactions.length > 0 && (
+                            <div className="pt-3 border-t border-zinc-800/80 space-y-2 animate-in fade-in duration-150">
+                              <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
+                                Deposits &amp; Inflow Transactions
+                              </span>
+                              <div className="space-y-1.5">
+                                {item.transactions.map((tx) => (
+                                  <div
+                                    key={tx.id}
+                                    className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-800/60 text-xs"
+                                  >
+                                    <div className="space-y-0.5 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-semibold text-white truncate">
+                                          {tx.payeeName}
+                                        </span>
+                                        <span className="text-zinc-500">•</span>
+                                        <span className="text-zinc-400">{tx.accountName}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                                        <span>{formatDate(tx.date)}</span>
+                                        {tx.memo && (
+                                          <>
+                                            <span>•</span>
+                                            <span className="italic text-zinc-400 truncate">
+                                              &quot;{tx.memo}&quot;
+                                            </span>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span className="font-bold font-mono text-emerald-400">
+                                        +{formatCurrency(tx.amount)}
+                                      </span>
+                                      {tx.cleared && (
+                                        <span
+                                          className={`text-[10px] px-2 py-0.5 rounded-full ${
+                                            tx.cleared === "cleared"
+                                              ? "bg-emerald-950/40 text-emerald-400 border border-emerald-800/40"
+                                              : "bg-zinc-800 text-zinc-400"
+                                          }`}
+                                        >
+                                          {tx.cleared}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Payee Breakdown Column */}
+              {(incomeBreakdownView === "both" || incomeBreakdownView === "payee") && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800/60">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-3.5 h-3.5 text-teal-400" />
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+                        Payee Breakdown
+                      </h3>
+                    </div>
+                    <span className="text-[11px] text-zinc-500 font-mono">
+                      {incomePayeeBreakdown.length}{" "}
+                      {incomePayeeBreakdown.length === 1 ? "payee" : "payees"}
+                    </span>
+                  </div>
+
+                  {incomePayeeBreakdown.length === 0 ? (
+                    <div className="p-6 text-center rounded-2xl border border-zinc-800/60 bg-zinc-950/20 text-xs text-zinc-500">
+                      No payees recorded for this month
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {incomePayeeBreakdown.map((item) => {
+                        const isExpanded = expandedIncomePayee === item.payeeName;
+
+                        return (
+                          <div
+                            key={item.payeeName}
+                            className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/70 hover:border-zinc-700/80 transition-all space-y-3"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              {/* Payee Info */}
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                                    <Building2 className="w-3.5 h-3.5 text-zinc-400" />
+                                    {item.payeeName}
+                                  </span>
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-teal-950/40 text-teal-300 border border-teal-800/40">
+                                    {item.percentageOfTotal}% of income
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2 flex-wrap text-[11px] text-zinc-400">
+                                  <span>
+                                    {item.transactionCount}{" "}
+                                    {item.transactionCount === 1 ? "deposit" : "deposits"}
+                                  </span>
+                                  {item.categories.length > 0 && (
+                                    <>
+                                      <span className="text-zinc-600">•</span>
+                                      <span className="text-zinc-500">Categories:</span>
+                                      {item.categories.map((cat) => (
+                                        <span
+                                          key={cat.categoryId}
+                                          className="text-[10px] font-medium px-2 py-0.2 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700/50"
+                                        >
+                                          {cat.categoryName}
+                                        </span>
+                                      ))}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Amount & Expand Toggle */}
+                              <div className="flex items-center justify-between sm:justify-end gap-3 sm:pl-4 sm:border-l sm:border-zinc-800">
+                                <div className="text-right">
+                                  <div className="text-lg font-extrabold text-teal-400 font-mono">
+                                    +{formatCurrency(item.totalIncome)}
+                                  </div>
+                                  <span className="text-[10px] text-zinc-500 block">
+                                    Total from Payee
+                                  </span>
+                                </div>
+
+                                {item.transactions.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedIncomePayee(
+                                        isExpanded ? null : item.payeeName
+                                      )
+                                    }
+                                    className="p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors"
+                                    title={
+                                      isExpanded
+                                        ? "Collapse transactions"
+                                        : "View transactions"
+                                    }
+                                  >
+                                    {isExpanded ? (
+                                      <ChevronUp className="w-4 h-4" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Progress Bar for Share of Income */}
+                            <div className="w-full">
+                              <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                                <div
+                                  className="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-300"
+                                  style={{
+                                    width: `${Math.min(100, item.percentageOfTotal)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Expanded Transactions List for this Payee */}
+                            {isExpanded && item.transactions.length > 0 && (
+                              <div className="pt-3 border-t border-zinc-800/80 space-y-2 animate-in fade-in duration-150">
+                                <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider block">
+                                  Deposits from {item.payeeName}
+                                </span>
+                                <div className="space-y-1.5">
+                                  {item.transactions.map((tx) => (
+                                    <div
+                                      key={tx.id}
+                                      className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-950/60 border border-zinc-800/60 text-xs"
+                                    >
+                                      <div className="space-y-0.5 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="font-semibold text-white truncate">
+                                            {tx.categoryName || "Inflow"}
+                                          </span>
+                                          <span className="text-zinc-500">•</span>
+                                          <span className="text-zinc-400">{tx.accountName}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                                          <span>{formatDate(tx.date)}</span>
+                                          {tx.memo && (
+                                            <>
+                                              <span>•</span>
+                                              <span className="italic text-zinc-400 truncate">
+                                                &quot;{tx.memo}&quot;
+                                              </span>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className="font-bold font-mono text-teal-400">
+                                          +{formatCurrency(tx.amount)}
+                                        </span>
+                                        {tx.cleared && (
+                                          <span
+                                            className={`text-[10px] px-2 py-0.5 rounded-full ${
+                                              tx.cleared === "cleared"
+                                                ? "bg-teal-950/40 text-teal-400 border border-teal-800/40"
+                                                : "bg-zinc-800 text-zinc-400"
+                                            }`}
+                                          >
+                                            {tx.cleared}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Category Spending Progress Breakdown Section */}
@@ -1456,6 +2312,16 @@ export default function BudgetsV2Page() {
           </div>
         )}
       </div>
+
+      {/* Configure Income Categories Modal */}
+      <ConfigureIncomeCategoriesModal
+        isOpen={isIncomeConfigOpen}
+        onClose={() => setIsIncomeConfigOpen(false)}
+        categories={categories}
+        selectedCategoryIds={selectedIncomeCategoryIds}
+        categoryInflowsThisMonth={categoryInflowMap}
+        onSave={handleSaveIncomeCategories}
+      />
 
       {/* Edit Budget Modal */}
       <EditBudget2Modal
