@@ -485,17 +485,11 @@ export default function BudgetsV2Page() {
     }
 
     // 2. Build local budget mapping for this month
+    // Default behavior for new monthly budgets is empty (no fallback to category standard budgeted values)
     const budgetMap = new Map<string, number>();
     if (localBudget?.categories) {
       for (const b of localBudget.categories) {
         budgetMap.set(b.category_id, b.amount);
-      }
-    } else {
-      // Fallback to category standard budgeted values if no local budget was created yet
-      for (const c of categories) {
-        if (c.budgeted) {
-          budgetMap.set(c.id, c.budgeted);
-        }
       }
     }
 
@@ -629,22 +623,13 @@ export default function BudgetsV2Page() {
   const handleMatchAllToSpent = async () => {
     setIsMatchingSpent(true);
     try {
-      const newCategoryAmounts = categories.map((cat) => {
-        const found = categoryList.find((c) => c.categoryId === cat.id);
-        return {
-          category_id: cat.id,
-          amount: found ? found.totalSpent : 0,
-        };
-      });
-
-      for (const c of categoryList) {
-        if (!newCategoryAmounts.some((na) => na.category_id === c.categoryId)) {
-          newCategoryAmounts.push({
-            category_id: c.categoryId,
-            amount: c.totalSpent,
-          });
-        }
-      }
+      // Only store category-amount pairs for categories with spending or active budget
+      const newCategoryAmounts = categoryList
+        .filter((c) => c.totalSpent > 0 || c.budgetedAmount > 0)
+        .map((c) => ({
+          category_id: c.categoryId,
+          amount: c.totalSpent,
+        }));
 
       await saveBudget(newCategoryAmounts);
       setMatchSuccess(true);

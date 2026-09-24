@@ -94,22 +94,17 @@ export class YNABDatabase extends Dexie {
       await this.transactions.bulkPut(DEMO_TRANSACTIONS);
       await this.settings.put(DEMO_SETTINGS);
 
-      const now = new Date();
-      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const monthsToSeed = Array.from(new Set(["2026-09", currentMonth]));
-
-      for (const m of monthsToSeed) {
-        await this.budgets.put({
-          id: `${DEMO_PLAN_ID}:${m}`,
-          plan_id: DEMO_PLAN_ID,
-          month: m,
-          categories: DEMO_CATEGORIES.map((c) => ({
-            category_id: c.id,
-            amount: c.budgeted,
-          })),
-          updated_at: new Date().toISOString(),
-        });
-      }
+      // Seed sample budget only for demo month 2026-09; all other/new monthly budgets default to empty
+      await this.budgets.put({
+        id: `${DEMO_PLAN_ID}:2026-09`,
+        plan_id: DEMO_PLAN_ID,
+        month: "2026-09",
+        categories: DEMO_CATEGORIES.map((c) => ({
+          category_id: c.id,
+          amount: c.budgeted,
+        })),
+        updated_at: new Date().toISOString(),
+      });
     });
   }
 
