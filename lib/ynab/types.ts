@@ -205,3 +205,16 @@ export interface BudgetSummary {
   totalRemaining: number; // in milliunits
   spendingPercentage: number;
 }
+
+export interface CategoryBudgetAmount {
+  category_id: string;
+  amount: number; // in milliunits (1000 = $1.00)
+}
+
+export interface Budget {
+  id: string; // `${plan_id}:${month}`
+  plan_id: string;
+  month: string; // 'YYYY-MM' (e.g. '2026-09')
+  categories: CategoryBudgetAmount[];
+  updated_at?: string;
+}

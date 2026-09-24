@@ -120,6 +120,45 @@ export class YNABApiClient {
   }
 
   /**
+   * Get all transactions for a specified month
+   * OperationId: getTransactionsByMonth
+   * Endpoint: /plans/{plan_id}/months/{month}/transactions
+   */
+  async getTransactionsByMonth(
+    planId: string,
+    month: string,
+    options?: {
+      since_date?: string;
+      until_date?: string;
+      type?: "uncategorized" | "unapproved";
+      lastKnowledgeOfServer?: number;
+    }
+  ): Promise<{ transactions: TransactionDetail[]; server_knowledge: number }> {
+    const params = new URLSearchParams();
+    if (options?.since_date) params.append("since_date", options.since_date);
+    if (options?.until_date) params.append("until_date", options.until_date);
+    if (options?.type) params.append("type", options.type);
+    if (options?.lastKnowledgeOfServer) {
+      params.append("last_knowledge_of_server", String(options.lastKnowledgeOfServer));
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+
+    try {
+      return await this.request<{ transactions: TransactionDetail[]; server_knowledge: number }>(
+        `/plans/${planId}/months/${month}/transactions${query}`
+      );
+    } catch (err: any) {
+      // Fallback to /budgets/ if /plans/ endpoint isn't supported on current server/token
+      if (err?.message?.includes("404")) {
+        return await this.request<{ transactions: TransactionDetail[]; server_knowledge: number }>(
+          `/budgets/${planId}/months/${month}/transactions${query}`
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Create a single transaction
    */
   async createTransaction(

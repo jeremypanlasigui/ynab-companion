@@ -8,6 +8,7 @@ import {
   SyncQueueItem,
   AppSettings,
   NewTransaction,
+  Budget,
 } from "./types";
 import {
   DEMO_PLAN,
@@ -27,6 +28,7 @@ export class YNABDatabase extends Dexie {
   transactions!: Table<TransactionDetail, string>;
   syncQueue!: Table<SyncQueueItem, number>;
   settings!: Table<AppSettings, string>;
+  budgets!: Table<Budget, string>;
 
   constructor() {
     super("YNABCompanionDB");
@@ -39,6 +41,10 @@ export class YNABDatabase extends Dexie {
       transactions: "&id, plan_id, date, account_id, category_id, deleted, cleared",
       syncQueue: "++id, type, createdAt, attempts",
       settings: "&id",
+    });
+
+    this.version(2).stores({
+      budgets: "&id, plan_id, month, [plan_id+month]",
     });
   }
 
@@ -59,6 +65,7 @@ export class YNABDatabase extends Dexie {
         this.transactions,
         this.syncQueue,
         this.settings,
+        this.budgets,
       ], async () => {
         await this.plans.clear();
         await this.accounts.clear();
@@ -67,6 +74,7 @@ export class YNABDatabase extends Dexie {
         await this.transactions.clear();
         await this.syncQueue.clear();
         await this.settings.clear();
+        await this.budgets.clear();
       });
     }
 
@@ -77,6 +85,7 @@ export class YNABDatabase extends Dexie {
       this.categories,
       this.transactions,
       this.settings,
+      this.budgets,
     ], async () => {
       await this.plans.put(DEMO_PLAN);
       await this.accounts.bulkPut(DEMO_ACCOUNTS);
@@ -84,7 +93,40 @@ export class YNABDatabase extends Dexie {
       await this.categories.bulkPut(DEMO_CATEGORIES);
       await this.transactions.bulkPut(DEMO_TRANSACTIONS);
       await this.settings.put(DEMO_SETTINGS);
+
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const monthsToSeed = Array.from(new Set(["2026-09", currentMonth]));
+
+      for (const m of monthsToSeed) {
+        await this.budgets.put({
+          id: `${DEMO_PLAN_ID}:${m}`,
+          plan_id: DEMO_PLAN_ID,
+          month: m,
+          categories: DEMO_CATEGORIES.map((c) => ({
+            category_id: c.id,
+            amount: c.budgeted,
+          })),
+          updated_at: new Date().toISOString(),
+        });
+      }
     });
+  }
+
+  /**
+   * Get budget for a plan and month ('YYYY-MM' or 'YYYY-MM-01')
+   */
+  async getBudget(planId: string, month: string): Promise<Budget | undefined> {
+    const monthKey = month.slice(0, 7);
+    const id = `${planId}:${monthKey}`;
+    return this.budgets.get(id);
+  }
+
+  /**
+   * Save or update budget for a plan and month
+   */
+  async saveBudget(budget: Budget): Promise<string> {
+    return this.budgets.put(budget);
   }
 
   /**

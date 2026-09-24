@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./db";
 import { syncManager } from "./sync";
-import { SyncStatusState, BudgetSummary } from "./types";
+import { SyncStatusState, BudgetSummary, Budget } from "./types";
 
 export function useSyncStatus() {
   const [status, setStatus] = useState<SyncStatusState>({
@@ -107,5 +107,59 @@ export function useBudgetSummary(): BudgetSummary {
     totalSpent,
     totalRemaining,
     spendingPercentage,
+  };
+}
+
+export function useLocalBudget(planId?: string, month?: string) {
+  const monthKey = month ? month.slice(0, 7) : "";
+  const budgetId = planId && monthKey ? `${planId}:${monthKey}` : undefined;
+
+  const budget = useLiveQuery(
+    async () => {
+      if (!budgetId) return undefined;
+      return db.budgets.get(budgetId);
+    },
+    [budgetId]
+  );
+
+  const saveBudget = async (categoryAmounts: { category_id: string; amount: number }[]) => {
+    if (!planId || !monthKey) return;
+    const newBudget: Budget = {
+      id: `${planId}:${monthKey}`,
+      plan_id: planId,
+      month: monthKey,
+      categories: categoryAmounts,
+      updated_at: new Date().toISOString(),
+    };
+    await db.budgets.put(newBudget);
+  };
+
+  const updateCategoryAmount = async (categoryId: string, amount: number) => {
+    if (!planId || !monthKey) return;
+    const current = (await db.budgets.get(`${planId}:${monthKey}`)) || {
+      id: `${planId}:${monthKey}`,
+      plan_id: planId,
+      month: monthKey,
+      categories: [],
+      updated_at: new Date().toISOString(),
+    };
+    const existingIndex = current.categories.findIndex((c) => c.category_id === categoryId);
+    const updatedCategories = [...current.categories];
+    if (existingIndex >= 0) {
+      updatedCategories[existingIndex] = { category_id: categoryId, amount };
+    } else {
+      updatedCategories.push({ category_id: categoryId, amount });
+    }
+    await db.budgets.put({
+      ...current,
+      categories: updatedCategories,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  return {
+    budget,
+    saveBudget,
+    updateCategoryAmount,
   };
 }
