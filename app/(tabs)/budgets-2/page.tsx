@@ -886,7 +886,12 @@ export default function BudgetsV2Page() {
           {filteredCategories.map((cat) => {
             const isExpanded = expandedCategoryId === cat.categoryId;
             const isEditing = inlineEditCatId === cat.categoryId;
+            const isUnbudgeted =
+              cat.budgetedAmount === 0 && cat.totalSpent > 0;
             const isOverBudget = cat.remainingAmount < 0;
+            const isOverspentOrUnbudgeted = isOverBudget || isUnbudgeted;
+            const isPerfect100 =
+              cat.budgetedAmount > 0 && cat.totalSpent === cat.budgetedAmount;
 
             return (
               <div
@@ -917,54 +922,83 @@ export default function BudgetsV2Page() {
                             {cat.transactionCount === 1 ? "tx" : "txs"}
                           </span>
                         )}
-                        {cat.budgetedAmount === 0 && cat.totalSpent > 0 && (
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 shrink-0">
+                        {isUnbudgeted && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20 shrink-0">
                             Unbudgeted
+                          </span>
+                        )}
+                        {isPerfect100 && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/30 shrink-0">
+                            100% Matched
                           </span>
                         )}
                       </div>
 
                       {/* Progress percentage */}
                       <span
-                        className={`text-xs font-mono font-bold shrink-0 ${
-                          isOverBudget
-                            ? "text-rose-400"
+                        className={`text-xs font-mono shrink-0 ${
+                          isOverspentOrUnbudgeted
+                            ? "text-rose-400 font-bold"
+                            : isPerfect100
+                            ? "text-green-400 font-black drop-shadow-[0_0_6px_rgba(74,222,128,0.4)]"
                             : cat.progressPercentage >= 85
-                            ? "text-amber-400"
-                            : "text-emerald-400"
+                            ? "text-amber-400 font-bold"
+                            : "text-zinc-300 font-semibold"
                         }`}
                       >
-                        {cat.progressPercentage}%
+                        {isUnbudgeted ? ">100%" : `${cat.progressPercentage}%`}
                       </span>
                     </div>
 
                     {/* Category Spending Progress Bar (Spent ÷ Budget) */}
                     <div className="w-full">
                       <ProgressBar
-                        value={cat.progressPercentage}
+                        value={isUnbudgeted ? 100 : cat.progressPercentage}
                         max={100}
                         height="sm"
-                        variant="dynamic"
+                        variant={isOverspentOrUnbudgeted ? "rose" : "dynamic"}
                       />
                     </div>
 
                     {/* Subtext info */}
                     <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-0.5">
                       <span className="truncate pr-2">
-                        <strong className="text-zinc-200">
+                        <strong
+                          className={
+                            isOverspentOrUnbudgeted
+                              ? "text-rose-400 font-bold"
+                              : isPerfect100
+                              ? "text-green-400 font-bold"
+                              : "text-zinc-200"
+                          }
+                        >
                           {formatCurrency(cat.totalSpent)}
                         </strong>{" "}
-                        spent of {formatCurrency(cat.budgetedAmount)} budgeted
+                        spent of{" "}
+                        <span
+                          className={
+                            isPerfect100
+                              ? "text-green-400 font-semibold"
+                              : ""
+                          }
+                        >
+                          {formatCurrency(cat.budgetedAmount)}
+                        </span>{" "}
+                        budgeted
                       </span>
                       <span
                         className={`shrink-0 ${
-                          isOverBudget
+                          isOverspentOrUnbudgeted
                             ? "text-rose-400 font-semibold"
+                            : isPerfect100
+                            ? "text-green-400 font-bold"
                             : "text-zinc-400"
                         }`}
                       >
-                        {isOverBudget
+                        {isOverspentOrUnbudgeted
                           ? `${formatCurrency(Math.abs(cat.remainingAmount))} over`
+                          : isPerfect100
+                          ? "$0.00 left"
                           : `${formatCurrency(cat.remainingAmount)} left`}
                       </span>
                     </div>
@@ -1030,7 +1064,15 @@ export default function BudgetsV2Page() {
                         <div className="text-right">
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs text-zinc-400">Budget:</span>
-                            <span className="text-sm font-bold text-white font-mono">
+                            <span
+                              className={`text-sm font-bold font-mono ${
+                                isOverspentOrUnbudgeted
+                                  ? "text-rose-400"
+                                  : isPerfect100
+                                  ? "text-green-400"
+                                  : "text-white"
+                              }`}
+                            >
                               {formatCurrency(cat.budgetedAmount)}
                             </span>
                             <button

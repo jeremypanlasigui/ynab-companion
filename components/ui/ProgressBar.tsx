@@ -28,12 +28,14 @@ export function ProgressBar({
 
   let colorClasses = "bg-emerald-500";
   if (variant === "dynamic") {
-    if (isOver || percentage >= 100) {
+    if (isOver || value > max) {
       colorClasses = "bg-rose-500";
+    } else if (value === max || percentage === 100) {
+      colorClasses = "bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.5)]";
     } else if (percentage >= 85) {
       colorClasses = "bg-amber-400";
     } else {
-      colorClasses = "bg-emerald-400";
+      colorClasses = "bg-teal-500";
     }
   } else if (variant === "mint") {
     colorClasses = "bg-teal-400";
