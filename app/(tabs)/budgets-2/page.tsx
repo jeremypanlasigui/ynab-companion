@@ -40,6 +40,7 @@ import {
   PieChart as PieChartIcon,
   Wand2,
   Equal,
+  Scale,
 } from "lucide-react";
 
 interface CategorySpendingSummary {
@@ -71,6 +72,16 @@ interface AccountTransferItem {
   memo?: string | null;
   cleared?: string;
   pairTransactionId?: string | null;
+}
+
+interface BalanceAdjustmentItem {
+  id: string;
+  date: string;
+  amount: number; // in milliunits (can be positive or negative)
+  accountName: string;
+  payeeName: string;
+  memo?: string | null;
+  cleared?: string;
 }
 
 // Consistent modern color palette for matching category colors between reality and budget charts
@@ -229,6 +240,8 @@ export default function BudgetsV2Page() {
     topCategory,
     transfersList,
     totalTransferred,
+    balanceAdjustmentsList,
+    totalAdjustmentsNet,
     realitySlices,
     budgetSlices,
   } = useMemo(() => {
@@ -246,12 +259,37 @@ export default function BudgetsV2Page() {
     >();
 
     const transfers: AccountTransferItem[] = [];
+    const balanceAdjustments: BalanceAdjustmentItem[] = [];
     const processedTransferIds = new Set<string>();
     let spendingTxCount = 0;
 
     // 1. Process transactions
     for (const tx of rawTransactions) {
       if (tx.deleted) continue;
+
+      // Balance adjustment detection (debt_transaction_type === 'balanceAdjustment' or reconciliation payee/memo)
+      const isTxBalanceAdjustment = Boolean(
+        tx.debt_transaction_type === "balanceAdjustment" ||
+        tx.payee_name?.toLowerCase().includes("balance adjustment") ||
+        tx.payee_name?.toLowerCase().includes("reconciliation") ||
+        tx.memo?.toLowerCase().includes("balance adjustment")
+      );
+
+      if (isTxBalanceAdjustment) {
+        balanceAdjustments.push({
+          id: tx.id,
+          date: tx.date,
+          amount: tx.amount,
+          accountName:
+            tx.account_name ||
+            accountsMap.get(tx.account_id) ||
+            "Unknown Account",
+          payeeName: tx.payee_name || "Reconciliation Balance Adjustment",
+          memo: tx.memo,
+          cleared: tx.cleared,
+        });
+        continue; // Exclude balance adjustments from spending & budget calculations
+      }
 
       // Transfer detection
       const isTxTransfer = Boolean(
@@ -306,6 +344,33 @@ export default function BudgetsV2Page() {
       if (tx.subtransactions && tx.subtransactions.length > 0) {
         for (const sub of tx.subtransactions) {
           if (sub.deleted) continue;
+
+          // Check if subtransaction is a balance adjustment
+          const isSubBalanceAdjustment = Boolean(
+            (sub as any).debt_transaction_type === "balanceAdjustment" ||
+            sub.payee_name?.toLowerCase().includes("balance adjustment") ||
+            sub.payee_name?.toLowerCase().includes("reconciliation") ||
+            sub.memo?.toLowerCase().includes("balance adjustment")
+          );
+
+          if (isSubBalanceAdjustment) {
+            balanceAdjustments.push({
+              id: `${tx.id}-${sub.id}`,
+              date: tx.date,
+              amount: sub.amount,
+              accountName:
+                tx.account_name ||
+                accountsMap.get(tx.account_id) ||
+                "Unknown Account",
+              payeeName:
+                sub.payee_name ||
+                tx.payee_name ||
+                "Reconciliation Balance Adjustment",
+              memo: sub.memo || tx.memo,
+              cleared: tx.cleared,
+            });
+            continue; // Exclude balance adjustments from spending & budget calculations
+          }
 
           const isSubTransfer = Boolean(
             sub.transfer_account_id ||
@@ -503,6 +568,10 @@ export default function BudgetsV2Page() {
     transfers.sort((a, b) => b.date.localeCompare(a.date));
     const totalTransferredVolume = transfers.reduce((acc, c) => acc + c.amount, 0);
 
+    // Sort balance adjustments by date descending
+    balanceAdjustments.sort((a, b) => b.date.localeCompare(a.date));
+    const totalAdjustmentsNet = balanceAdjustments.reduce((acc, c) => acc + c.amount, 0);
+
     // 5. Generate pie chart slices for Reality and Budget
     const realitySlices: PieChartSlice[] = combinedList
       .filter((c) => c.totalSpent > 0)
@@ -530,6 +599,8 @@ export default function BudgetsV2Page() {
       topCategory: top,
       transfersList: transfers,
       totalTransferred: totalTransferredVolume,
+      balanceAdjustmentsList: balanceAdjustments,
+      totalAdjustmentsNet,
       realitySlices,
       budgetSlices,
     };
@@ -743,7 +814,7 @@ export default function BudgetsV2Page() {
             {totalSpendingTxCount}
           </div>
           <p className="text-[11px] text-zinc-500 mt-1">
-            Excludes internal transfers
+            Excludes transfers &amp; adjustments
           </p>
         </div>
 
@@ -1268,6 +1339,135 @@ export default function BudgetsV2Page() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Balance Adjustments Section (Split Out & Excluded from Budget Calculations) */}
+      <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800/80">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+              <Scale className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white tracking-tight">
+                  Balance Adjustments
+                </h2>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-zinc-800 text-purple-300 border border-zinc-700/60">
+                  {balanceAdjustmentsList.length}{" "}
+                  {balanceAdjustmentsList.length === 1 ? "adjustment" : "adjustments"}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Account reconciliation corrections •{" "}
+                <span className="text-zinc-500">
+                  Excluded from budget spending &amp; category totals
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {balanceAdjustmentsList.length > 0 && (
+            <div className="flex items-center gap-2 text-xs bg-zinc-900 px-3 py-1.5 rounded-xl border border-zinc-800 text-zinc-300">
+              <span className="text-zinc-500">Net Adjustment:</span>
+              <span
+                className={`font-extrabold font-mono ${
+                  totalAdjustmentsNet > 0
+                    ? "text-emerald-400"
+                    : totalAdjustmentsNet < 0
+                    ? "text-rose-400"
+                    : "text-white"
+                }`}
+              >
+                {formatCurrency(totalAdjustmentsNet, { showSign: true })}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Balance Adjustments List */}
+        {balanceAdjustmentsList.length === 0 ? (
+          <div className="text-center py-8 px-4 rounded-2xl border border-zinc-800/60 bg-zinc-950/30">
+            <Scale className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+            <p className="text-xs font-semibold text-zinc-300">
+              No balance adjustments this month
+            </p>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              No reconciliation balance adjustments recorded for {formattedMonthLabel}.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {balanceAdjustmentsList.map((adj) => {
+              const isPositive = adj.amount > 0;
+              const isNegative = adj.amount < 0;
+
+              return (
+                <div
+                  key={adj.id}
+                  className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/70 hover:border-zinc-700/80 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  {/* Account Involved, Payee & Date */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 text-xs font-medium text-white flex-wrap">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 border border-zinc-700/60 text-zinc-200">
+                        <Landmark className="w-3.5 h-3.5 text-zinc-400" />
+                        <span className="font-semibold">{adj.accountName}</span>
+                      </div>
+                      <span className="text-zinc-500">•</span>
+                      <span className="font-medium text-zinc-300">{adj.payeeName}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                      <span>{formatDate(adj.date)}</span>
+                      {adj.memo && (
+                        <>
+                          <span>•</span>
+                          <span className="italic text-zinc-400">
+                            &quot;{adj.memo}&quot;
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Amount & Status */}
+                  <div className="flex items-center justify-between sm:justify-end gap-3 sm:pl-4 sm:border-l sm:border-zinc-800">
+                    <div className="text-right">
+                      <div
+                        className={`text-base font-extrabold font-mono ${
+                          isPositive
+                            ? "text-emerald-400"
+                            : isNegative
+                            ? "text-rose-400"
+                            : "text-white"
+                        }`}
+                      >
+                        {formatCurrency(adj.amount, { showSign: true })}
+                      </div>
+                      <span className="text-[10px] text-zinc-500 block">
+                        Reconciliation
+                      </span>
+                    </div>
+                    {adj.cleared && (
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                          adj.cleared === "reconciled"
+                            ? "bg-purple-950/40 text-purple-400 border border-purple-800/40"
+                            : adj.cleared === "cleared"
+                            ? "bg-emerald-950/40 text-emerald-400 border border-emerald-800/40"
+                            : "bg-zinc-800 text-zinc-400"
+                        }`}
+                      >
+                        {adj.cleared}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -455,6 +455,22 @@ export const DEMO_TRANSACTIONS: TransactionDetail[] = [
     transfer_transaction_id: "tx-13",
     deleted: false,
   },
+  {
+    id: "tx-15",
+    plan_id: DEMO_PLAN_ID,
+    date: new Date(Date.now() - 86400000 * 2).toISOString().slice(0, 10),
+    amount: -1500, // -$1.50 adjustment
+    memo: "Reconciliation adjustment to match bank statement",
+    cleared: "reconciled",
+    approved: true,
+    account_id: "acc-checking-1",
+    account_name: "Chase Total Checking",
+    payee_name: "Reconciliation Balance Adjustment",
+    category_id: null,
+    category_name: null,
+    debt_transaction_type: "balanceAdjustment",
+    deleted: false,
+  },
 ];
 
 export const DEMO_SETTINGS: AppSettings = {

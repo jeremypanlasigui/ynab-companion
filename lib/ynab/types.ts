@@ -129,6 +129,16 @@ export interface TransactionDetail {
   import_id?: string | null;
   subtransactions?: SubTransaction[];
   deleted: boolean;
+  debt_transaction_type?:
+    | "payment"
+    | "refund"
+    | "fee"
+    | "interest"
+    | "escrow"
+    | "balanceAdjustment"
+    | "credit"
+    | "charge"
+    | null;
   plan_id?: string;
   is_local?: boolean; // True if locally created/mutated before sync
 }
