@@ -45,6 +45,7 @@ import {
   Wallet,
   Coins,
   Building2,
+  PlusCircle,
 } from "lucide-react";
 import { ConfigureIncomeCategoriesModal } from "@/components/ynab/ConfigureIncomeCategoriesModal";
 
@@ -84,6 +85,17 @@ interface BalanceAdjustmentItem {
   date: string;
   amount: number; // in milliunits (can be positive or negative)
   accountName: string;
+  payeeName: string;
+  memo?: string | null;
+  cleared?: string;
+}
+
+interface StartingBalanceItem {
+  id: string;
+  date: string;
+  amount: number; // in milliunits (positive or negative)
+  accountName: string;
+  accountType?: string;
   payeeName: string;
   memo?: string | null;
   cleared?: string;
@@ -330,6 +342,8 @@ export default function BudgetsV2Page() {
     totalTransferred,
     balanceAdjustmentsList,
     totalAdjustmentsNet,
+    accountsAddedList,
+    totalAccountsAddedNet,
     totalMonthIncome,
     incomeCategoryBreakdown,
     incomePayeeBreakdown,
@@ -379,12 +393,39 @@ export default function BudgetsV2Page() {
 
     const transfers: AccountTransferItem[] = [];
     const balanceAdjustments: BalanceAdjustmentItem[] = [];
+    const accountsAdded: StartingBalanceItem[] = [];
     const processedTransferIds = new Set<string>();
     let spendingTxCount = 0;
 
     // 1. Process transactions
     for (const tx of rawTransactions) {
       if (tx.deleted) continue;
+
+      // Starting balance detection (YNAB creates these when adding a new account)
+      const isTxStartingBalance = Boolean(
+        tx.payee_name?.trim().toLowerCase() === "starting balance" ||
+        tx.payee_name?.toLowerCase().includes("starting balance") ||
+        tx.memo?.toLowerCase().includes("starting balance")
+      );
+
+      if (isTxStartingBalance) {
+        const accObj = accounts.find((a) => a.id === tx.account_id);
+        accountsAdded.push({
+          id: tx.id,
+          date: tx.date,
+          amount: tx.amount,
+          accountName:
+            tx.account_name ||
+            accObj?.name ||
+            accountsMap.get(tx.account_id) ||
+            "Account",
+          accountType: accObj?.type,
+          payeeName: tx.payee_name || "Starting Balance",
+          memo: tx.memo,
+          cleared: tx.cleared,
+        });
+        continue; // Exclude starting balances from budget spending, category totals, and income
+      }
 
       // Track inflow amounts for modal category badges
       if (tx.amount > 0) {
@@ -473,6 +514,33 @@ export default function BudgetsV2Page() {
       if (tx.subtransactions && tx.subtransactions.length > 0) {
         for (const sub of tx.subtransactions) {
           if (sub.deleted) continue;
+
+          // Check if subtransaction is a starting balance
+          const isSubStartingBalance = Boolean(
+            sub.payee_name?.trim().toLowerCase() === "starting balance" ||
+            sub.payee_name?.toLowerCase().includes("starting balance") ||
+            sub.memo?.toLowerCase().includes("starting balance") ||
+            tx.payee_name?.toLowerCase().includes("starting balance")
+          );
+
+          if (isSubStartingBalance) {
+            const accObj = accounts.find((a) => a.id === tx.account_id);
+            accountsAdded.push({
+              id: `${tx.id}-${sub.id}`,
+              date: tx.date,
+              amount: sub.amount,
+              accountName:
+                tx.account_name ||
+                accObj?.name ||
+                accountsMap.get(tx.account_id) ||
+                "Account",
+              accountType: accObj?.type,
+              payeeName: sub.payee_name || tx.payee_name || "Starting Balance",
+              memo: sub.memo || tx.memo,
+              cleared: tx.cleared,
+            });
+            continue; // Exclude starting balance from spending & budget calculations
+          }
 
           if (sub.amount > 0) {
             const rawCatId =
@@ -774,6 +842,10 @@ export default function BudgetsV2Page() {
     balanceAdjustments.sort((a, b) => b.date.localeCompare(a.date));
     const totalAdjustmentsNet = balanceAdjustments.reduce((acc, c) => acc + c.amount, 0);
 
+    // Sort accounts added by date descending
+    accountsAdded.sort((a, b) => b.date.localeCompare(a.date));
+    const totalAccountsAddedNet = accountsAdded.reduce((acc, c) => acc + c.amount, 0);
+
     // 5. Aggregate Income Breakdown
     // Include all categories configured as income, showing $0 if no deposits occurred
     for (const catId of selectedIncomeCategoryIds) {
@@ -926,6 +998,8 @@ export default function BudgetsV2Page() {
       totalTransferred: totalTransferredVolume,
       balanceAdjustmentsList: balanceAdjustments,
       totalAdjustmentsNet,
+      accountsAddedList: accountsAdded,
+      totalAccountsAddedNet,
       totalMonthIncome,
       incomeCategoryBreakdown,
       incomePayeeBreakdown,
@@ -2309,6 +2383,129 @@ export default function BudgetsV2Page() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+
+      {/* Accounts Added Section (Starting Balances Split Out & Excluded from Budget) */}
+      <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800/80">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+              <PlusCircle className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white tracking-tight">
+                  Accounts Added
+                </h2>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-zinc-800 text-sky-300 border border-zinc-700/60">
+                  {accountsAddedList.length}{" "}
+                  {accountsAddedList.length === 1 ? "account added" : "accounts added"}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Starting balances from newly connected or created accounts •{" "}
+                <span className="text-zinc-500">
+                  Excluded from budget spending &amp; category totals
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {accountsAddedList.length > 0 && (
+            <div className="flex items-center gap-2 text-xs bg-zinc-900 px-3 py-1.5 rounded-xl border border-zinc-800 text-zinc-300">
+              <span className="text-zinc-500">Total Starting Balance:</span>
+              <span
+                className={`font-extrabold font-mono ${
+                  totalAccountsAddedNet >= 0 ? "text-sky-400" : "text-rose-400"
+                }`}
+              >
+                {formatCurrency(totalAccountsAddedNet, { showSign: true })}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Accounts Added List */}
+        {accountsAddedList.length === 0 ? (
+          <div className="text-center py-8 px-4 rounded-2xl border border-zinc-800/60 bg-zinc-950/30">
+            <PlusCircle className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+            <p className="text-xs font-semibold text-zinc-300">
+              No accounts added this month
+            </p>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              No starting balance transactions recorded for {formattedMonthLabel}.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {accountsAddedList.map((item) => (
+              <div
+                key={item.id}
+                className="p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/70 hover:border-zinc-700/80 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                {/* Account Details, Type & Date */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs font-medium text-white flex-wrap">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 border border-zinc-700/60 text-zinc-200">
+                      <Landmark className="w-3.5 h-3.5 text-sky-400" />
+                      <span className="font-semibold">{item.accountName}</span>
+                    </div>
+                    {item.accountType && (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700/60 capitalize">
+                        {item.accountType}
+                      </span>
+                    )}
+                    <span className="text-zinc-500">•</span>
+                    <span className="text-[11px] font-medium text-sky-300 bg-sky-950/30 px-2 py-0.5 rounded-md border border-sky-800/30">
+                      {item.payeeName}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                    <span>Added {formatDate(item.date)}</span>
+                    {item.memo && (
+                      <>
+                        <span>•</span>
+                        <span className="italic text-zinc-400">
+                          &quot;{item.memo}&quot;
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Amount & Status */}
+                <div className="flex items-center justify-between sm:justify-end gap-3 sm:pl-4 sm:border-l sm:border-zinc-800">
+                  <div className="text-right">
+                    <div
+                      className={`text-base font-extrabold font-mono ${
+                        item.amount >= 0 ? "text-sky-400" : "text-rose-400"
+                      }`}
+                    >
+                      {formatCurrency(item.amount, { showSign: true })}
+                    </div>
+                    <span className="text-[10px] text-zinc-500 block">
+                      Starting Balance
+                    </span>
+                  </div>
+                  {item.cleared && (
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                        item.cleared === "reconciled"
+                          ? "bg-purple-950/40 text-purple-400 border border-purple-800/40"
+                          : item.cleared === "cleared"
+                          ? "bg-emerald-950/40 text-emerald-400 border border-emerald-800/40"
+                          : "bg-zinc-800 text-zinc-400"
+                      }`}
+                    >
+                      {item.cleared}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

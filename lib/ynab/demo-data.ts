@@ -518,6 +518,21 @@ export const DEMO_TRANSACTIONS: TransactionDetail[] = [
     category_name: "Freelance & Consulting",
     deleted: false,
   },
+  {
+    id: "tx-17",
+    plan_id: DEMO_PLAN_ID,
+    date: new Date(Date.now() - 86400000 * 20).toISOString().slice(0, 10),
+    amount: 25000000, // +$25,000.00 Starting Balance
+    memo: "Initial account opening balance",
+    cleared: "reconciled",
+    approved: true,
+    account_id: "acc-savings-1",
+    account_name: "Marcus High Yield Savings",
+    payee_name: "Starting Balance",
+    category_id: "cat-inflow",
+    category_name: "Inflow: Ready to Assign",
+    deleted: false,
+  },
 ];
 
 export const DEMO_SETTINGS: AppSettings = {
