@@ -68,6 +68,11 @@ ynab-companion-app/
 └── ...             # Config files (tailwind.config.ts, tsconfig.json, etc.)
 ```
 
+## Documentation
+
+- **[Architecture & System Guidelines](docs/architecture.md)**: Detailed breakdown of the offline-first multi-tier storage model (Dexie IndexedDB + AES-256-GCM encrypted SQLite), synchronization lifecycle, and refactoring roadmap.
+- **[UI Style Guide & Frontend Conventions](docs/styleguide.md)**: Visual design tokens, Tailwind CSS standards, milliunit financial representation rules, component patterns, and React 19 / TypeScript guidelines.
+
 ## Getting Started & Run Instructions
 
 ### Prerequisites
