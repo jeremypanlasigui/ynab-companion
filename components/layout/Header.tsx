@@ -8,7 +8,6 @@ import { SyncStatusIndicator } from "@/components/ynab/SyncStatusIndicator";
 import { SettingsModal } from "@/components/ynab/SettingsModal";
 import { AddTransactionModal } from "@/components/ynab/AddTransactionModal";
 import {
-  Sparkles,
   Settings,
   PlusCircle,
   LayoutDashboard,
@@ -26,7 +25,6 @@ export function Header() {
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/budget", label: "Budget", icon: PieChart },
-    { href: "/budgets-2", label: "Budgets 2.0", icon: Sparkles },
     { href: "/transactions", label: "Transactions", icon: Receipt },
   ];
 
