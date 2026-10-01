@@ -20,6 +20,19 @@ import {
   DEMO_PLAN_ID,
 } from "./demo-data";
 
+async function postMutation(action: string, payload: any) {
+  if (typeof window === "undefined") return;
+  try {
+    await fetch("/api/data/mutate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, payload }),
+    });
+  } catch (err) {
+    console.warn("Background server mutation push failed (will retry on sync):", err);
+  }
+}
+
 export class YNABDatabase extends Dexie {
   plans!: Table<PlanSummary, string>;
   accounts!: Table<Account, string>;
@@ -49,13 +62,98 @@ export class YNABDatabase extends Dexie {
   }
 
   async initializeDefaults() {
+    // 1. Attempt to bootstrap from encrypted server-side SQLite database
+    if (typeof window !== "undefined") {
+      try {
+        const res = await fetch("/api/data/bootstrap");
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            await this.populateFromData(json.data);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not bootstrap from server SQLite API, using local cache:", err);
+      }
+    }
+
+    // 2. Fallback to local Dexie cache or demo seeding if empty
     const existingSettings = await this.settings.get("app_settings");
     if (!existingSettings) {
       await this.seedDemoData();
     }
   }
 
+  async populateFromData(data: {
+    plans?: PlanSummary[];
+    accounts?: Account[];
+    categoryGroups?: CategoryGroup[];
+    categories?: Category[];
+    transactions?: TransactionDetail[];
+    budgets?: Budget[];
+    settings?: AppSettings;
+    syncQueue?: SyncQueueItem[];
+  }) {
+    await this.transaction("rw", [
+      this.plans,
+      this.accounts,
+      this.categoryGroups,
+      this.categories,
+      this.transactions,
+      this.budgets,
+      this.settings,
+    ], async () => {
+      if (data.plans) {
+        await this.plans.clear();
+        if (data.plans.length) await this.plans.bulkPut(data.plans);
+      }
+      if (data.accounts) {
+        await this.accounts.clear();
+        if (data.accounts.length) await this.accounts.bulkPut(data.accounts);
+      }
+      if (data.categoryGroups) {
+        await this.categoryGroups.clear();
+        if (data.categoryGroups.length) await this.categoryGroups.bulkPut(data.categoryGroups);
+      }
+      if (data.categories) {
+        await this.categories.clear();
+        if (data.categories.length) await this.categories.bulkPut(data.categories);
+      }
+      if (data.transactions) {
+        await this.transactions.clear();
+        if (data.transactions.length) await this.transactions.bulkPut(data.transactions);
+      }
+      if (data.budgets) {
+        await this.budgets.clear();
+        if (data.budgets.length) await this.budgets.bulkPut(data.budgets);
+      }
+      if (data.settings) {
+        await this.settings.put(data.settings);
+      }
+    });
+  }
+
   async seedDemoData(force = false) {
+    if (force && typeof window !== "undefined") {
+      try {
+        const res = await fetch("/api/data/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reset_demo" }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            await this.populateFromData(json.data);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Server reset_demo failed, resetting locally:", err);
+      }
+    }
+
     if (force) {
       await this.transaction("rw", [
         this.plans,
@@ -94,7 +192,7 @@ export class YNABDatabase extends Dexie {
       await this.transactions.bulkPut(DEMO_TRANSACTIONS);
       await this.settings.put(DEMO_SETTINGS);
 
-      // Seed sample budget only for demo month 2026-09; all other/new monthly budgets default to empty
+      // Seed sample budget only for demo month 2026-09
       await this.budgets.put({
         id: `${DEMO_PLAN_ID}:2026-09`,
         plan_id: DEMO_PLAN_ID,
@@ -121,11 +219,13 @@ export class YNABDatabase extends Dexie {
    * Save or update budget for a plan and month
    */
   async saveBudget(budget: Budget): Promise<string> {
-    return this.budgets.put(budget);
+    const res = await this.budgets.put(budget);
+    postMutation("SAVE_BUDGET", budget);
+    return res;
   }
 
   /**
-   * Optimistically add a new transaction locally and enqueue for sync
+   * Optimistically add a new transaction locally and persist to SQLite
    */
   async addLocalTransaction(newTx: NewTransaction, planId?: string): Promise<TransactionDetail> {
     const settings = await this.settings.get("app_settings");
@@ -178,14 +278,14 @@ export class YNABDatabase extends Dexie {
 
       // 3. Optimistically update category spending activity and remaining balance
       if (category) {
-        category.activity += newTx.amount; // newTx.amount is negative for spending
+        category.activity += newTx.amount;
         category.balance += newTx.amount;
         await this.categories.put(category);
       }
 
       // 4. Enqueue to sync queue if not in demo mode with no token
       if (settings && !settings.is_demo_mode && settings.api_token) {
-        await this.syncQueue.add({
+        const queueItem: SyncQueueItem = {
           type: "CREATE_TRANSACTION",
           payload: {
             plan_id: activePlanId,
@@ -203,15 +303,20 @@ export class YNABDatabase extends Dexie {
           },
           createdAt: new Date().toISOString(),
           attempts: 0,
-        });
+        };
+        await this.syncQueue.add(queueItem);
+        postMutation("ADD_SYNC_QUEUE", queueItem);
       }
     });
+
+    // Persist mutation to encrypted SQLite
+    postMutation("SAVE_TRANSACTION", fullTx);
 
     return fullTx;
   }
 
   /**
-   * Optimistically update category budget amount and enqueue for sync
+   * Optimistically update category budget amount and persist to SQLite
    */
   async updateCategoryBudget(categoryId: string, newBudgetedMilliunits: number, month?: string) {
     const settings = await this.settings.get("app_settings");
@@ -227,7 +332,7 @@ export class YNABDatabase extends Dexie {
       await this.categories.put(category);
 
       if (settings && !settings.is_demo_mode && settings.api_token) {
-        await this.syncQueue.add({
+        const queueItem: SyncQueueItem = {
           type: "UPDATE_CATEGORY_BUDGET",
           payload: {
             plan_id: activePlanId,
@@ -237,13 +342,21 @@ export class YNABDatabase extends Dexie {
           },
           createdAt: new Date().toISOString(),
           attempts: 0,
-        });
+        };
+        await this.syncQueue.add(queueItem);
+        postMutation("ADD_SYNC_QUEUE", queueItem);
       }
+    });
+
+    postMutation("UPDATE_CATEGORY_BUDGET", {
+      category_id: categoryId,
+      budgeted: newBudgetedMilliunits,
+      month,
     });
   }
 
   /**
-   * Optimistically delete transaction
+   * Optimistically delete transaction and persist to SQLite
    */
   async deleteLocalTransaction(id: string) {
     const tx = await this.transactions.get(id);
@@ -280,7 +393,7 @@ export class YNABDatabase extends Dexie {
       await this.transactions.delete(id);
 
       if (settings && !settings.is_demo_mode && settings.api_token && !tx.is_local) {
-        await this.syncQueue.add({
+        const queueItem: SyncQueueItem = {
           type: "DELETE_TRANSACTION",
           payload: {
             plan_id: tx.plan_id || settings.selected_plan_id,
@@ -288,8 +401,17 @@ export class YNABDatabase extends Dexie {
           },
           createdAt: new Date().toISOString(),
           attempts: 0,
-        });
+        };
+        await this.syncQueue.add(queueItem);
+        postMutation("ADD_SYNC_QUEUE", queueItem);
       }
+    });
+
+    postMutation("DELETE_TRANSACTION", {
+      id,
+      account_id: tx.account_id,
+      amount: tx.amount,
+      category_id: tx.category_id,
     });
   }
 }

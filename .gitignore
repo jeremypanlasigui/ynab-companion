@@ -61,6 +61,14 @@ Thumbs.db
 *.swo
 *~
 
+# Local Database
+/data/
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
 # Temporary / Scratch
 scratch/
 .system_generated/

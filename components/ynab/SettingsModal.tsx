@@ -4,8 +4,7 @@ import { useState, useEffect } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { db } from "@/lib/ynab/db";
 import { useYNABData, useSyncStatus } from "@/lib/ynab/hooks";
-import { YNABApiClient } from "@/lib/ynab/api";
-import { KeyRound, Database, Check, Eye, EyeOff, RotateCcw, Sparkles } from "lucide-react";
+import { KeyRound, ShieldCheck, Check, Eye, EyeOff, RotateCcw, Sparkles } from "lucide-react";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -23,6 +22,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [hasEnvToken, setHasEnvToken] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -33,25 +33,37 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }, [settings]);
 
   const handleTestAndFetch = async () => {
-    if (!token.trim()) {
-      setTestResult({ success: false, message: "Please provide a YNAB Personal Access Token." });
-      return;
-    }
-
     setIsTesting(true);
     setTestResult(null);
 
     try {
-      const client = new YNABApiClient(token.trim());
-      const res = await client.getPlans();
-      if (res.plans && res.plans.length > 0) {
-        await db.plans.bulkPut(res.plans);
-        if (!selectedPlanId || !res.plans.some((p) => p.id === selectedPlanId)) {
-          setSelectedPlanId(res.default_plan?.id || res.plans[0].id);
+      const res = await fetch("/api/ynab/test-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+
+      const data = await res.json();
+      if (data.hasEnvToken) {
+        setHasEnvToken(true);
+      }
+
+      if (!res.ok || !data.success) {
+        setTestResult({
+          success: false,
+          message: data.error || "Failed to connect to YNAB API.",
+        });
+        return;
+      }
+
+      if (data.plans && data.plans.length > 0) {
+        await db.plans.bulkPut(data.plans);
+        if (!selectedPlanId || !data.plans.some((p: any) => p.id === selectedPlanId)) {
+          setSelectedPlanId(data.default_plan?.id || data.plans[0].id);
         }
         setTestResult({
           success: true,
-          message: `Connected successfully! Found ${res.plans.length} plan(s).`,
+          message: `Connected successfully! Found ${data.plans.length} plan(s).`,
         });
       } else {
         setTestResult({ success: false, message: "Connected, but no plans found in your account." });
@@ -76,7 +88,20 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       is_demo_mode: isDemoMode,
     };
 
+    // Update local Dexie cache
     await db.settings.put(updated);
+
+    // Persist securely to encrypted server-side SQLite
+    try {
+      await fetch("/api/data/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "SAVE_SETTINGS", payload: updated }),
+      });
+    } catch (err) {
+      console.warn("Failed persisting settings to server SQLite:", err);
+    }
+
     setSaveSuccess(true);
 
     if (!isDemoMode && token.trim()) {
@@ -101,10 +126,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       isOpen={isOpen}
       onClose={onClose}
       title="App Settings & YNAB Sync"
-      description="Configure your YNAB access token and local offline storage"
+      description="Configure your YNAB access token and encrypted persistent storage"
       maxWidth="md"
     >
       <div className="space-y-5 text-sm">
+        {/* Security Banner */}
+        <div className="rounded-xl border border-teal-500/20 bg-teal-950/20 p-3 flex items-center justify-between text-xs text-teal-300">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-teal-400 shrink-0" />
+            <span>SQLite database encrypted with <strong>AES-256-GCM</strong> at rest (`data/budget.sqlite`).</span>
+          </div>
+        </div>
+
         {/* Mode Selector */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3.5 flex items-center justify-between">
           <div className="space-y-0.5">
@@ -169,11 +202,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <button
               type="button"
               onClick={handleTestAndFetch}
-              disabled={isTesting || !token.trim()}
+              disabled={isTesting || (!token.trim() && !hasEnvToken)}
               className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-50 transition-colors"
             >
               {isTesting ? "Connecting..." : "Test Connection & Load Plans"}
             </button>
+            <p className="text-[11px] text-zinc-500">
+              Tokens are stored encrypted in SQLite or via .env.local
+            </p>
           </div>
 
           {testResult && (

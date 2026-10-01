@@ -22,7 +22,10 @@ The UI should have two main modes:
 
 ## Key Features
 
-- Offline-first architecture with local storage and sync
+- **Persistent Local Database**: Node.js native SQLite database (`data/budget.sqlite`) persisting across all server restarts, reloads, and browser cache clears
+- **AES-256-GCM Encrypted at Rest**: All financial transactions, balances, amounts, category targets, and the YNAB Personal Access Token are encrypted on disk
+- **Zero-Friction Key Management**: Automatically derives and persists a 256-bit encryption key in `.env.local` (`ENCRYPTION_KEY`)
+- Offline-first architecture with reactive local cache (Dexie IndexedDB) synchronized with SQLite
 - Fast, responsive UI with modern design
 - Quick actions for common tasks (adding transactions, categorizing, etc.)
 - View budgets, transactions, and accounts
