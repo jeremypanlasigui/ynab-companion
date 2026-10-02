@@ -414,6 +414,24 @@ export class YNABDatabase extends Dexie {
       category_id: tx.category_id,
     });
   }
+
+  /**
+   * Persist configured income categories for a plan into AppSettings and sync to SQLite
+   */
+  async saveIncomeCategories(planId: string, categoryIds: string[]) {
+    const current = await this.settings.get("app_settings");
+    if (!current) return;
+    const updatedByPlan = {
+      ...(current.income_category_ids_by_plan || {}),
+      [planId]: categoryIds,
+    };
+    const updated: AppSettings = {
+      ...current,
+      income_category_ids_by_plan: updatedByPlan,
+    };
+    await this.settings.put(updated);
+    postMutation("SAVE_SETTINGS", updated);
+  }
 }
 
 export const db = new YNABDatabase();

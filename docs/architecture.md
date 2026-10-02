@@ -136,32 +136,34 @@ During our codebase audit, several architectural opportunities were identified:
 
 To ensure high expandability (e.g., adding net worth charts, recurring bill tracking, rule engines, or AI financial categorization), we adopt the following target architecture:
 
-### 5.1 Domain-Driven Feature Decomposition
-Decompose `budgets-2` into a modular feature package:
+### 5.1 Domain-Driven Feature Decomposition (Completed)
+Decomposed the monolithic 2,536-line page into the modular feature package:
 
 ```
-components/ynab/budget/ (or features/budget/)
-├── components/
-│   ├── MonthNavigator.tsx           # Previous/Next month selector & pacing
-│   ├── BudgetOverviewCards.tsx      # Top stat cards (Budgeted, Spent, Remaining)
-│   ├── IncomeBreakdownCard.tsx      # Inflow totals, payee/category drill-down
-│   ├── TransfersCard.tsx            # Inter-account transfer pairs
-│   ├── CategorySpendingList.tsx     # Categories list with progress & inline edits
-│   ├── CategorySpendingRow.tsx      # Individual row + accordion transactions
-│   └── UnbudgetedSpendingCard.tsx   # Categories spent without budget allocations
-├── hooks/
-│   ├── useBudgetMonthCalculations.ts # Pure calculation hook (spent, income, transfers)
-│   └── useIncomeCategories.ts       # Hook for managing income category selections
-└── types.ts                         # Domain-specific budget breakdown interfaces
+components/ynab/budget/
+├── AdjustmentsAndStartingBalancesSection.tsx # Balance adjustments and starting balances
+├── BudgetKpiCards.tsx                       # Top stat cards (Income, Spending, Net Cashflow, Budgeted)
+├── CategorySpendingSection.tsx              # Categories list with progress & inline edits
+├── DistributionCharts.tsx                   # Reality vs Budget side-by-side distribution pie charts
+├── IncomeBreakdownSection.tsx               # Inflow totals, payee/category drill-down
+├── MonthNavigator.tsx                       # Previous/Next month selector & ribbon
+├── TransfersSection.tsx                     # Inter-account transfer pairs
+├── constants.ts                             # Color palettes and constants
+├── index.ts                                 # Barrel export
+├── types.ts                                 # Domain-specific budget breakdown interfaces
+└── useBudgetCalculations.ts                 # Pure calculation hook (spent, income, transfers)
 ```
 
-### 5.2 Consolidate Budget Routing
-- Promote the modularized v2 budget experience to become the primary `/budget` route.
-- Deprecate `/budgets-2` or redirect it to `/budget`.
-- Clean up navigation in `Header.tsx` so only **Dashboard**, **Budget**, and **Transactions** appear.
+### 5.2 Consolidate Budget Routing (Completed)
+- Promoted the modularized v2 budget experience to become the primary [`/budget`](file:///c:/Users/jbmpa/git/ynab-companion-app/app/(tabs)/budget/page.tsx) route.
+- Deprecated `/budgets-2` with a Next.js `redirect("/budget")`.
+- Cleaned up [`Header.tsx`](file:///c:/Users/jbmpa/git/ynab-companion-app/components/layout/Header.tsx) navigation to only display:
+  - **Dashboard** (`/dashboard`)
+  - **Budget** (`/budget`)
+  - **Transactions** (`/transactions`)
 
-### 5.3 Centralize Settings in `AppSettings` Schema
-- Extend `AppSettings` in `lib/ynab/types.ts`:
+### 5.3 Centralize Settings in `AppSettings` Schema (Completed)
+- Extended `AppSettings` in `lib/ynab/types.ts`:
   ```typescript
   export interface AppSettings {
     id: "app_settings";
@@ -171,10 +173,12 @@ components/ynab/budget/ (or features/budget/)
     is_demo_mode: boolean;
     last_server_knowledge: number;
     last_synced_at: string | null;
-    income_category_ids?: string[]; // Persisted in Dexie and encrypted SQLite
+    income_category_ids_by_plan?: Record<string, string[]>;
   }
   ```
-- Eliminate all direct browser `localStorage` calls.
+- Added `encrypted_income_categories TEXT` column to the server-side SQLite `settings` table with AES-256-GCM encryption at rest.
+- Implemented `db.saveIncomeCategories(planId, categoryIds)` to update both Dexie and server SQLite.
+- Completely eliminated all browser `localStorage` calls across the application.
 
 ### 5.4 Formalize Data Access Layer (DAL) & Discriminated Mutations
 Replace loose `postMutation(action: string, payload: any)` with strongly typed action contracts:

@@ -56,6 +56,7 @@ class ServerDatabase {
         is_demo_mode INTEGER,
         last_server_knowledge INTEGER,
         last_synced_at TEXT,
+        encrypted_income_categories TEXT,
         updated_at TEXT
       );
 
@@ -128,6 +129,12 @@ class ServerDatabase {
         last_error TEXT
       );
     `);
+
+    try {
+      this.db.exec("ALTER TABLE settings ADD COLUMN encrypted_income_categories TEXT;");
+    } catch {
+      // Column already exists
+    }
   }
 
   // ==========================================
@@ -152,6 +159,15 @@ class ServerDatabase {
       decryptedToken = process.env.YNAB_ACCESS_TOKEN.trim();
     }
 
+    let incomeCategoriesByPlan: Record<string, string[]> = {};
+    if (row.encrypted_income_categories) {
+      try {
+        incomeCategoriesByPlan = decryptPayload(row.encrypted_income_categories);
+      } catch (err) {
+        console.error("Failed to decrypt stored income categories:", err);
+      }
+    }
+
     return {
       id: "app_settings",
       api_token: decryptedToken,
@@ -160,6 +176,7 @@ class ServerDatabase {
       is_demo_mode: Boolean(row.is_demo_mode),
       last_server_knowledge: row.last_server_knowledge || 0,
       last_synced_at: row.last_synced_at || null,
+      income_category_ids_by_plan: incomeCategoriesByPlan,
     };
   }
 
@@ -177,6 +194,7 @@ class ServerDatabase {
       is_demo_mode: true,
       last_server_knowledge: 0,
       last_synced_at: null,
+      income_category_ids_by_plan: {},
     };
 
     const merged: AppSettings = {
@@ -185,10 +203,13 @@ class ServerDatabase {
     };
 
     const encryptedToken = merged.api_token ? encryptString(merged.api_token) : "";
+    const incomeCats =
+      merged.income_category_ids_by_plan || current.income_category_ids_by_plan || {};
+    const encryptedIncomeCategories = encryptPayload(incomeCats);
 
     const stmt = this.db.prepare(`
-      INSERT INTO settings (id, encrypted_token, selected_plan_id, selected_plan_name, is_demo_mode, last_server_knowledge, last_synced_at, updated_at)
-      VALUES ('app_settings', ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO settings (id, encrypted_token, selected_plan_id, selected_plan_name, is_demo_mode, last_server_knowledge, last_synced_at, encrypted_income_categories, updated_at)
+      VALUES ('app_settings', ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         encrypted_token = excluded.encrypted_token,
         selected_plan_id = excluded.selected_plan_id,
@@ -196,6 +217,7 @@ class ServerDatabase {
         is_demo_mode = excluded.is_demo_mode,
         last_server_knowledge = excluded.last_server_knowledge,
         last_synced_at = excluded.last_synced_at,
+        encrypted_income_categories = excluded.encrypted_income_categories,
         updated_at = excluded.updated_at
     `);
 
@@ -206,6 +228,7 @@ class ServerDatabase {
       merged.is_demo_mode ? 1 : 0,
       merged.last_server_knowledge,
       merged.last_synced_at,
+      encryptedIncomeCategories,
       new Date().toISOString()
     );
 

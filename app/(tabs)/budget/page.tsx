@@ -5,6 +5,7 @@ import { useYNABData, useLocalBudget } from "@/lib/ynab/hooks";
 import { YNABApiClient } from "@/lib/ynab/api";
 import { TransactionDetail } from "@/lib/ynab/types";
 import { DEMO_TRANSACTIONS, DEMO_PLAN_ID } from "@/lib/ynab/demo-data";
+import { db } from "@/lib/ynab/db";
 import { EditBudget2Modal } from "@/components/ynab/EditBudget2Modal";
 import { ConfigureIncomeCategoriesModal } from "@/components/ynab/ConfigureIncomeCategoriesModal";
 import { AlertCircle } from "lucide-react";
@@ -52,45 +53,33 @@ export default function BudgetPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isIncomeConfigOpen, setIsIncomeConfigOpen] = useState(false);
 
-  // Income configuration states
-  const [selectedIncomeCategoryIds, setSelectedIncomeCategoryIds] = useState<Set<string>>(() => {
-    if (typeof window !== "undefined") {
+  // Derive selected income categories reactively from encrypted database AppSettings
+  const selectedIncomeCategoryIds = useMemo(() => {
+    const list = settings?.income_category_ids_by_plan?.[activePlanId];
+    if (list && list.length > 0) {
+      return new Set(list);
+    }
+
+    // One-time automatic migration: if legacy localStorage exists, read and migrate into DB
+    if (typeof window !== "undefined" && activePlanId) {
       const stored = localStorage.getItem(`ynab_income_categories_${activePlanId}`);
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
+            void db.saveIncomeCategories(activePlanId, parsed);
+            localStorage.removeItem(`ynab_income_categories_${activePlanId}`);
             return new Set(parsed);
           }
         } catch {}
       }
     }
+
     return new Set(["cat-inflow", "cat-side-income", "inflow:ready-to-assign"]);
-  });
+  }, [settings?.income_category_ids_by_plan, activePlanId]);
 
-  // Sync income categories when plan changes
-  useEffect(() => {
-    if (typeof window !== "undefined" && activePlanId) {
-      const stored = localStorage.getItem(`ynab_income_categories_${activePlanId}`);
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setSelectedIncomeCategoryIds(new Set(parsed));
-          }
-        } catch {}
-      }
-    }
-  }, [activePlanId]);
-
-  const handleSaveIncomeCategories = (newSelected: Set<string>) => {
-    setSelectedIncomeCategoryIds(newSelected);
-    if (typeof window !== "undefined" && activePlanId) {
-      localStorage.setItem(
-        `ynab_income_categories_${activePlanId}`,
-        JSON.stringify(Array.from(newSelected))
-      );
-    }
+  const handleSaveIncomeCategories = async (newSelected: Set<string>) => {
+    await db.saveIncomeCategories(activePlanId, Array.from(newSelected));
   };
 
   // Fetch transactions using getTransactionsByMonth endpoint

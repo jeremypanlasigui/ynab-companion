@@ -543,4 +543,7 @@ export const DEMO_SETTINGS: AppSettings = {
   is_demo_mode: true,
   last_server_knowledge: 100,
   last_synced_at: new Date().toISOString(),
+  income_category_ids_by_plan: {
+    [DEMO_PLAN_ID]: ["cat-inflow", "cat-side-income", "inflow:ready-to-assign"],
+  },
 };

@@ -184,6 +184,7 @@ export interface AppSettings {
   is_demo_mode: boolean;
   last_server_knowledge: number;
   last_synced_at: string | null;
+  income_category_ids_by_plan?: Record<string, string[]>;
 }
 
 export type SyncOperationType =
