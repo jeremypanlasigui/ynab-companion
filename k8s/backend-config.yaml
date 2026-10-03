@@ -1,0 +1,34 @@
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: ynab-companion-backend-config
+  labels:
+    app.kubernetes.io/name: ynab-companion
+    app.kubernetes.io/part-of: ynab-companion-app
+spec:
+  # Connection draining enables pods to complete in-flight requests during autoscaling scale-down
+  connectionDraining:
+    drainingTimeoutSec: 60
+
+  # Custom health check configuration targeting the Next.js health endpoint
+  healthCheck:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 3
+    type: HTTP
+    requestPath: /api/health
+    port: 3000
+
+  # Cloud CDN caching offloads immutable Next.js static assets (_next/static/*)
+  # onto Google Cloud edge locations worldwide, keeping backend pod compute costs minimal
+  cdn:
+    enabled: true
+    cachePolicy:
+      includeHost: true
+      includeProtocol: true
+      includeQueryString: false
+  
+  # Session affinity (optional: None or GENERATED_COOKIE)
+  sessionAffinity:
+    affinityType: NONE

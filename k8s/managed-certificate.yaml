@@ -1,0 +1,11 @@
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: ynab-companion-cert
+  labels:
+    app.kubernetes.io/name: ynab-companion
+    app.kubernetes.io/part-of: ynab-companion-app
+spec:
+  domains:
+    # Replace with your actual domain or subdomain (e.g., ynab.yourdomain.com)
+    - "ynab.example.com"

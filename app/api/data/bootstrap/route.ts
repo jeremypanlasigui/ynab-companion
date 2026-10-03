@@ -3,7 +3,7 @@ import { serverDb } from "@/lib/server/db";
 
 export async function GET() {
   try {
-    const data = serverDb.getBootstrapData();
+    const data = await serverDb.getBootstrapData();
     return NextResponse.json({ success: true, data });
   } catch (err: any) {
     console.error("Bootstrap GET error:", err);
@@ -19,24 +19,24 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     if (body.action === "reset_demo") {
-      serverDb.seedDemoData(true);
-      const data = serverDb.getBootstrapData();
+      await serverDb.seedDemoData(true);
+      const data = await serverDb.getBootstrapData();
       return NextResponse.json({ success: true, message: "Demo data reset successfully", data });
     }
 
     if (body.action === "save_all" && body.data) {
       const { plans, accounts, categoryGroups, categories, transactions, budgets, settings } = body.data;
-      if (plans) serverDb.savePlans(plans);
-      if (accounts) serverDb.saveAccounts(accounts);
-      if (categoryGroups) serverDb.saveCategoryGroups(categoryGroups);
-      if (categories) serverDb.saveCategories(categories);
-      if (transactions) serverDb.saveTransactions(transactions);
+      if (plans) await serverDb.savePlans(plans);
+      if (accounts) await serverDb.saveAccounts(accounts);
+      if (categoryGroups) await serverDb.saveCategoryGroups(categoryGroups);
+      if (categories) await serverDb.saveCategories(categories);
+      if (transactions) await serverDb.saveTransactions(transactions);
       if (budgets) {
-        for (const b of budgets) serverDb.saveBudget(b);
+        for (const b of budgets) await serverDb.saveBudget(b);
       }
-      if (settings) serverDb.saveSettings(settings);
+      if (settings) await serverDb.saveSettings(settings);
 
-      const refreshed = serverDb.getBootstrapData();
+      const refreshed = await serverDb.getBootstrapData();
       return NextResponse.json({ success: true, data: refreshed });
     }
 

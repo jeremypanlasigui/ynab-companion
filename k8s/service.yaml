@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ynab-companion-service
+  labels:
+    app.kubernetes.io/name: ynab-companion
+    app.kubernetes.io/part-of: ynab-companion-app
+  annotations:
+    # Container-Native Load Balancing via Network Endpoint Groups (NEGs)
+    # Directs traffic from Google Cloud Load Balancer directly to Pod IPs
+    cloud.google.com/neg: '{"ingress": true}'
+    # Associates service with Google Cloud BackendConfig for CDN and Healthchecks
+    cloud.google.com/backend-config: '{"default": "ynab-companion-backend-config"}'
+spec:
+  type: ClusterIP
+  selector:
+    app: ynab-companion
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP

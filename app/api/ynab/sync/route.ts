@@ -2,27 +2,27 @@ import { NextResponse } from "next/server";
 import { YNABApiClient } from "@/lib/ynab/api";
 import { serverDb } from "@/lib/server/db";
 
-export async function POST(req: Request) {
+export async function POST() {
   try {
-    const settings = serverDb.getSettings();
+    let settings = await serverDb.getSettings();
     if (!settings) {
-      serverDb.seedDemoData();
+      await serverDb.seedDemoData();
     }
-    const currentSettings = serverDb.getSettings();
+    const currentSettings = await serverDb.getSettings();
     if (!currentSettings) {
       return NextResponse.json({ success: false, error: "Settings not found" }, { status: 500 });
     }
 
-    const token = serverDb.getEffectiveToken();
+    const token = await serverDb.getEffectiveToken();
 
     // If demo mode or no token configured, simulate instant local sync
     if (currentSettings.is_demo_mode || !token) {
-      serverDb.clearSyncQueue();
+      await serverDb.clearSyncQueue();
       currentSettings.last_synced_at = new Date().toISOString();
-      serverDb.saveSettings(currentSettings);
+      await serverDb.saveSettings(currentSettings);
       return NextResponse.json({
         success: true,
-        data: serverDb.getBootstrapData(),
+        data: await serverDb.getBootstrapData(),
       });
     }
 
@@ -38,12 +38,12 @@ export async function POST(req: Request) {
     const client = new YNABApiClient(token);
 
     // 1. Drain pending sync queue
-    const queue = serverDb.getSyncQueue();
+    const queue = await serverDb.getSyncQueue();
     for (const item of queue) {
       try {
         if (item.type === "CREATE_TRANSACTION") {
           await client.createTransaction(item.payload.plan_id, item.payload.transaction);
-          if (item.id) serverDb.deleteSyncQueueItem(item.id);
+          if (item.id) await serverDb.deleteSyncQueueItem(item.id);
         } else if (item.type === "UPDATE_CATEGORY_BUDGET") {
           await client.updateCategoryBudget(
             item.payload.plan_id,
@@ -51,10 +51,10 @@ export async function POST(req: Request) {
             item.payload.category_id,
             item.payload.budgeted
           );
-          if (item.id) serverDb.deleteSyncQueueItem(item.id);
+          if (item.id) await serverDb.deleteSyncQueueItem(item.id);
         } else if (item.type === "DELETE_TRANSACTION") {
           await client.deleteTransaction(item.payload.plan_id, item.payload.transaction_id);
-          if (item.id) serverDb.deleteSyncQueueItem(item.id);
+          if (item.id) await serverDb.deleteSyncQueueItem(item.id);
         }
       } catch (err: any) {
         console.error("Server sync item error:", item, err);
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
         ...acc,
         plan_id: planId,
       }));
-      serverDb.saveAccounts(accountsWithPlan);
+      await serverDb.saveAccounts(accountsWithPlan);
     }
 
     if (planData.category_groups?.length) {
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
         deleted: cg.deleted,
         plan_id: planId,
       }));
-      serverDb.saveCategoryGroups(groups);
+      await serverDb.saveCategoryGroups(groups);
     }
 
     if (planData.categories?.length) {
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
         ...c,
         plan_id: planId,
       }));
-      serverDb.saveCategories(categoriesWithPlan);
+      await serverDb.saveCategories(categoriesWithPlan);
     }
 
     if (planData.transactions?.length) {
@@ -102,14 +102,14 @@ export async function POST(req: Request) {
         ...tx,
         plan_id: planId,
       }));
-      serverDb.saveTransactions(txsWithPlan);
+      await serverDb.saveTransactions(txsWithPlan);
     }
 
     currentSettings.last_server_knowledge = serverKnowledge;
     currentSettings.last_synced_at = new Date().toISOString();
-    serverDb.saveSettings(currentSettings);
+    await serverDb.saveSettings(currentSettings);
 
-    const updatedData = serverDb.getBootstrapData();
+    const updatedData = await serverDb.getBootstrapData();
     return NextResponse.json({
       success: true,
       data: updatedData,

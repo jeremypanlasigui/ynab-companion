@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     let token = body.token?.trim();
 
     if (!token) {
-      token = serverDb.getEffectiveToken();
+      token = await serverDb.getEffectiveToken();
     }
 
     if (!token) {
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     const res = await client.getPlans();
 
     if (res.plans && res.plans.length > 0) {
-      serverDb.savePlans(res.plans);
+      await serverDb.savePlans(res.plans);
     }
 
     return NextResponse.json({

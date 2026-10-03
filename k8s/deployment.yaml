@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ynab-companion
+  labels:
+    app.kubernetes.io/name: ynab-companion
+    app.kubernetes.io/part-of: ynab-companion-app
+spec:
+  # Base replica count; HorizontalPodAutoscaler adjusts between 1 and 10
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: ynab-companion
+  template:
+    metadata:
+      labels:
+        app: ynab-companion
+    spec:
+      serviceAccountName: ynab-companion-sa
+      terminationGracePeriodSeconds: 60
+      containers:
+        # ====================================================================
+        # 1. Main Application Container (Next.js Standalone)
+        # ====================================================================
+        - name: app
+          # Replace with your Artifact Registry or Container Registry image URL:
+          # e.g., us-central1-docker.pkg.dev/YOUR_PROJECT_ID/ynab/app:latest
+          image: gcr.io/YOUR_PROJECT_ID/ynab-companion:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: ynab-companion-config
+            - secretRef:
+                name: ynab-companion-secrets
+          # Sized for minimal idle cost on GKE Autopilot (0.25 vCPU, 512Mi RAM baseline)
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          # Liveness probe checks process responsiveness without triggering restarts on external DB blips
+          livenessProbe:
+            httpGet:
+              path: /api/health?db=false
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness probe verifies full database connectivity before serving traffic
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+
+        # ====================================================================
+        # 2. Cloud SQL Auth Proxy Sidecar
+        # Provides secure, IAM-authenticated mTLS tunnel to Google Cloud SQL
+        # Listening on 127.0.0.1:5432 (shared Pod localhost network)
+        # ====================================================================
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.0
+          args:
+            - "--port=5432"
+            - "--address=0.0.0.0"
+            - "$(INSTANCE_CONNECTION_NAME)"
+          env:
+            - name: INSTANCE_CONNECTION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ynab-companion-config
+                  key: INSTANCE_CONNECTION_NAME
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532 # nonroot user in distroless image
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
