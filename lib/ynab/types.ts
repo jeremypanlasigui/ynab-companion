@@ -229,3 +229,51 @@ export interface Budget {
   categories: CategoryBudgetAmount[];
   updated_at?: string;
 }
+
+// Food Budgeting & Receipt Ingestion Types
+export type FoodSubCategory =
+  | "fruits"
+  | "veggies"
+  | "meat"
+  | "dairy"
+  | "snacks"
+  | "pantry"
+  | "beverages"
+  | "prepared"
+  | "home goods"
+  | "other";
+
+export interface PurchasedGood {
+  id: string;
+  receipt_id: string;
+  name: string;
+  amount: number; // in milliunits (negative for expense outflow, e.g. -4990 = $4.99)
+  category: FoodSubCategory;
+  is_food: boolean; // false if home goods/non-food
+  notes?: string;
+}
+
+export type ReceiptMatchStatus = "matched" | "unresolved" | "manual";
+
+export interface ReceiptIngestion {
+  id: string;
+  plan_id: string;
+  date: string; // 'YYYY-MM-DD'
+  vendor: string; // e.g. "Trader Joe's", "Costco", "Target"
+  total_amount: number; // milliunits (negative)
+  food_amount: number; // milliunits (negative)
+  non_food_amount: number; // milliunits (negative)
+  status: ReceiptMatchStatus;
+  matched_transaction_id?: string | null;
+  raw_text?: string;
+  image_url?: string;
+  goods: PurchasedGood[];
+  created_at: string;
+}
+
+export interface SaveSubTransaction {
+  amount: number;
+  category_id?: string | null;
+  memo?: string | null;
+  payee_name?: string | null;
+}

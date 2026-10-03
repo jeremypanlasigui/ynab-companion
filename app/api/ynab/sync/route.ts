@@ -52,6 +52,13 @@ export async function POST() {
             item.payload.budgeted
           );
           if (item.id) await serverDb.deleteSyncQueueItem(item.id);
+        } else if (item.type === "UPDATE_TRANSACTION") {
+          await client.updateTransaction(
+            item.payload.plan_id,
+            item.payload.transaction_id,
+            item.payload.transaction
+          );
+          if (item.id) await serverDb.deleteSyncQueueItem(item.id);
         } else if (item.type === "DELETE_TRANSACTION") {
           await client.deleteTransaction(item.payload.plan_id, item.payload.transaction_id);
           if (item.id) await serverDb.deleteSyncQueueItem(item.id);

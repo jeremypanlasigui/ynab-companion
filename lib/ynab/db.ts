@@ -9,6 +9,8 @@ import {
   AppSettings,
   NewTransaction,
   Budget,
+  ReceiptIngestion,
+  SubTransaction,
 } from "./types";
 import {
   DEMO_PLAN,
@@ -18,6 +20,7 @@ import {
   DEMO_TRANSACTIONS,
   DEMO_SETTINGS,
   DEMO_PLAN_ID,
+  DEMO_RECEIPTS,
 } from "./demo-data";
 
 async function postMutation(action: string, payload: any) {
@@ -42,6 +45,7 @@ export class YNABDatabase extends Dexie {
   syncQueue!: Table<SyncQueueItem, number>;
   settings!: Table<AppSettings, string>;
   budgets!: Table<Budget, string>;
+  receipts!: Table<ReceiptIngestion, string>;
 
   constructor() {
     super("YNABCompanionDB");
@@ -58,6 +62,10 @@ export class YNABDatabase extends Dexie {
 
     this.version(2).stores({
       budgets: "&id, plan_id, month, [plan_id+month]",
+    });
+
+    this.version(3).stores({
+      receipts: "&id, plan_id, date, vendor, status, matched_transaction_id, created_at",
     });
   }
 
@@ -94,6 +102,7 @@ export class YNABDatabase extends Dexie {
     budgets?: Budget[];
     settings?: AppSettings;
     syncQueue?: SyncQueueItem[];
+    receipts?: ReceiptIngestion[];
   }) {
     await this.transaction("rw", [
       this.plans,
@@ -103,6 +112,7 @@ export class YNABDatabase extends Dexie {
       this.transactions,
       this.budgets,
       this.settings,
+      this.receipts,
     ], async () => {
       if (data.plans) {
         await this.plans.clear();
@@ -127,6 +137,10 @@ export class YNABDatabase extends Dexie {
       if (data.budgets) {
         await this.budgets.clear();
         if (data.budgets.length) await this.budgets.bulkPut(data.budgets);
+      }
+      if (data.receipts) {
+        await this.receipts.clear();
+        if (data.receipts.length) await this.receipts.bulkPut(data.receipts);
       }
       if (data.settings) {
         await this.settings.put(data.settings);
@@ -164,6 +178,7 @@ export class YNABDatabase extends Dexie {
         this.syncQueue,
         this.settings,
         this.budgets,
+        this.receipts,
       ], async () => {
         await this.plans.clear();
         await this.accounts.clear();
@@ -173,6 +188,7 @@ export class YNABDatabase extends Dexie {
         await this.syncQueue.clear();
         await this.settings.clear();
         await this.budgets.clear();
+        await this.receipts.clear();
       });
     }
 
@@ -184,6 +200,7 @@ export class YNABDatabase extends Dexie {
       this.transactions,
       this.settings,
       this.budgets,
+      this.receipts,
     ], async () => {
       await this.plans.put(DEMO_PLAN);
       await this.accounts.bulkPut(DEMO_ACCOUNTS);
@@ -191,6 +208,7 @@ export class YNABDatabase extends Dexie {
       await this.categories.bulkPut(DEMO_CATEGORIES);
       await this.transactions.bulkPut(DEMO_TRANSACTIONS);
       await this.settings.put(DEMO_SETTINGS);
+      await this.receipts.bulkPut(DEMO_RECEIPTS);
 
       // Seed sample budget only for demo month 2026-09
       await this.budgets.put({
@@ -432,6 +450,157 @@ export class YNABDatabase extends Dexie {
     await this.settings.put(updated);
     postMutation("SAVE_SETTINGS", updated);
   }
+
+  /**
+   * Get all receipts for a plan
+   */
+  async getReceipts(planId?: string): Promise<ReceiptIngestion[]> {
+    const settings = await this.settings.get("app_settings");
+    const activePlanId = planId || settings?.selected_plan_id || DEMO_PLAN_ID;
+    return this.receipts.where("plan_id").equals(activePlanId).reverse().sortBy("created_at");
+  }
+
+  /**
+   * Save or update receipt
+   */
+  async saveReceipt(receipt: ReceiptIngestion): Promise<string> {
+    const res = await this.receipts.put(receipt);
+    postMutation("SAVE_RECEIPT", receipt);
+    return res;
+  }
+
+  /**
+   * Delete receipt
+   */
+  async deleteReceipt(id: string): Promise<void> {
+    await this.receipts.delete(id);
+    postMutation("DELETE_RECEIPT", { id });
+  }
+
+  /**
+   * Link receipt to YNAB transaction and apply split subtransactions
+   */
+  async linkReceiptToTransaction(
+    receiptId: string,
+    transactionId: string,
+    subtransactions: SubTransaction[]
+  ): Promise<void> {
+    const tx = await this.transactions.get(transactionId);
+    const receipt = await this.receipts.get(receiptId);
+    if (!tx || !receipt) {
+      throw new Error("Transaction or Receipt not found");
+    }
+
+    const settings = await this.settings.get("app_settings");
+    const activePlanId = tx.plan_id || settings?.selected_plan_id || DEMO_PLAN_ID;
+
+    // 1. Update transaction to split
+    const updatedTx: TransactionDetail = {
+      ...tx,
+      category_id: null,
+      category_name: "Split (Multiple Categories)",
+      subtransactions,
+    };
+
+    // 2. Update receipt status
+    const updatedReceipt: ReceiptIngestion = {
+      ...receipt,
+      status: "matched",
+      matched_transaction_id: transactionId,
+    };
+
+    await this.transaction("rw", [this.transactions, this.receipts, this.syncQueue], async () => {
+      await this.transactions.put(updatedTx);
+      await this.receipts.put(updatedReceipt);
+
+      // Enqueue sync if connected to live YNAB API
+      if (settings && !settings.is_demo_mode && settings.api_token && !tx.is_local) {
+        const queueItem: SyncQueueItem = {
+          type: "UPDATE_TRANSACTION",
+          payload: {
+            plan_id: activePlanId,
+            transaction_id: transactionId,
+            transaction: {
+              account_id: tx.account_id,
+              date: tx.date,
+              amount: tx.amount,
+              payee_id: tx.payee_id,
+              payee_name: tx.payee_name,
+              category_id: null,
+              memo: tx.memo,
+              cleared: tx.cleared,
+              approved: tx.approved,
+              flag_color: tx.flag_color,
+              subtransactions: subtransactions.map((st) => ({
+                amount: st.amount,
+                category_id: st.category_id,
+                memo: st.memo,
+                payee_name: st.payee_name,
+              })),
+            },
+          },
+          createdAt: new Date().toISOString(),
+          attempts: 0,
+        };
+        await this.syncQueue.add(queueItem);
+        postMutation("ADD_SYNC_QUEUE", queueItem);
+      }
+    });
+
+    postMutation("SAVE_TRANSACTION", updatedTx);
+    postMutation("SAVE_RECEIPT", updatedReceipt);
+  }
+
+  /**
+   * Search for candidate YNAB transactions to match against a receipt
+   */
+  async findCandidateTransactions(
+    planId: string,
+    receiptDate: string,
+    receiptAmount: number,
+    vendorName: string
+  ): Promise<TransactionDetail[]> {
+    const all = await this.transactions.where("plan_id").equals(planId).toArray();
+    const cleanVendor = vendorName.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    // Score and rank candidates
+    const scored = all
+      .filter((t) => !t.deleted)
+      .map((t) => {
+        let score = 0;
+        const txDate = new Date(t.date).getTime();
+        const rDate = new Date(receiptDate).getTime();
+        const dayDiff = Math.abs(txDate - rDate) / (1000 * 60 * 60 * 24);
+
+        // Amount matching (exact or within small tolerance)
+        const exactAmountMatch = Math.abs(t.amount) === Math.abs(receiptAmount);
+        if (exactAmountMatch) score += 60;
+        else if (Math.abs(Math.abs(t.amount) - Math.abs(receiptAmount)) <= 1000) {
+          score += 25; // within $1.00
+        }
+
+        // Payee/vendor matching
+        const txPayee = (t.payee_name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (txPayee && cleanVendor) {
+          if (txPayee === cleanVendor) score += 40;
+          else if (txPayee.includes(cleanVendor) || cleanVendor.includes(txPayee)) score += 30;
+        }
+
+        // Date proximity
+        if (dayDiff === 0) score += 20;
+        else if (dayDiff <= 1) score += 15;
+        else if (dayDiff <= 3) score += 10;
+        else if (dayDiff <= 7) score += 5;
+
+        return { tx: t, score, dayDiff };
+      })
+      .filter((item) => item.score >= 25)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.tx);
+
+    return scored;
+  }
 }
 
 export const db = new YNABDatabase();
+

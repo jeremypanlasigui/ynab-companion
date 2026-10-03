@@ -11,6 +11,8 @@ import {
   TransactionDetail,
   Budget,
   SyncQueueItem,
+  ReceiptIngestion,
+  PurchasedGood,
 } from "../ynab/types";
 import {
   DEMO_PLAN,
@@ -20,6 +22,7 @@ import {
   DEMO_TRANSACTIONS,
   DEMO_SETTINGS,
   DEMO_PLAN_ID,
+  DEMO_RECEIPTS,
 } from "../ynab/demo-data";
 import {
   encryptPayload,
@@ -127,6 +130,17 @@ interface SyncQueueRow {
   last_error: string | null;
 }
 
+interface ReceiptRow {
+  id: string;
+  plan_id: string;
+  date: string;
+  vendor: string;
+  status: string;
+  matched_transaction_id: string | null;
+  encrypted_payload: string | null;
+  updated_at: string;
+}
+
 // ==========================================
 // SQLITE DRIVER (Local Development)
 // ==========================================
@@ -228,6 +242,17 @@ class SqliteDriver implements IDatabaseDriver {
         created_at TEXT,
         attempts INTEGER,
         last_error TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS receipts (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT,
+        date TEXT,
+        vendor TEXT,
+        status TEXT,
+        matched_transaction_id TEXT,
+        encrypted_payload TEXT,
+        updated_at TEXT
       );
     `);
 
@@ -411,6 +436,17 @@ class PostgresDriver implements IDatabaseDriver {
           created_at TEXT,
           attempts INTEGER,
           last_error TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS receipts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT,
+          date TEXT,
+          vendor TEXT,
+          status TEXT,
+          matched_transaction_id TEXT,
+          encrypted_payload TEXT,
+          updated_at TEXT
         );
 
         ALTER TABLE settings ADD COLUMN IF NOT EXISTS encrypted_income_categories TEXT;
@@ -1030,6 +1066,91 @@ export class ServerDatabase {
   }
 
   // ==========================================
+  // RECEIPTS
+  // ==========================================
+  public async getReceipts(): Promise<ReceiptIngestion[]> {
+    await this.ensureInitialized();
+    const res = await this.driver.query<ReceiptRow>(
+      "SELECT * FROM receipts ORDER BY date DESC"
+    );
+    return res.rows.map((r) => {
+      let payload: {
+        total_amount?: number;
+        food_amount?: number;
+        non_food_amount?: number;
+        raw_text?: string;
+        image_url?: string;
+        goods?: PurchasedGood[];
+      } = {};
+      try {
+        if (r.encrypted_payload) {
+          payload = decryptPayload(r.encrypted_payload);
+        }
+      } catch (err) {
+        console.error("Failed to decrypt receipt payload:", err);
+      }
+      return {
+        id: r.id,
+        plan_id: r.plan_id,
+        date: r.date,
+        vendor: r.vendor,
+        status: (r.status || "unresolved") as any,
+        matched_transaction_id: r.matched_transaction_id || null,
+        total_amount: payload.total_amount ?? 0,
+        food_amount: payload.food_amount ?? 0,
+        non_food_amount: payload.non_food_amount ?? 0,
+        raw_text: payload.raw_text,
+        image_url: payload.image_url,
+        goods: payload.goods || [],
+        created_at: r.updated_at,
+      };
+    });
+  }
+
+  public async saveReceipts(receipts: ReceiptIngestion[]): Promise<void> {
+    await this.ensureInitialized();
+    for (const r of receipts) {
+      const payload = encryptPayload({
+        total_amount: r.total_amount,
+        food_amount: r.food_amount,
+        non_food_amount: r.non_food_amount,
+        raw_text: r.raw_text,
+        image_url: r.image_url,
+        goods: r.goods,
+      });
+
+      const sql = `
+        INSERT INTO receipts (id, plan_id, date, vendor, status, matched_transaction_id, encrypted_payload, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          plan_id = excluded.plan_id,
+          date = excluded.date,
+          vendor = excluded.vendor,
+          status = excluded.status,
+          matched_transaction_id = excluded.matched_transaction_id,
+          encrypted_payload = excluded.encrypted_payload,
+          updated_at = excluded.updated_at
+      `;
+
+      await this.driver.execute(sql, [
+        r.id,
+        r.plan_id,
+        r.date,
+        r.vendor,
+        r.status,
+        r.matched_transaction_id || null,
+        payload,
+        r.created_at || new Date().toISOString(),
+      ]);
+    }
+  }
+
+  public async deleteReceipt(id: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.driver.execute("DELETE FROM receipts WHERE id = ?", [id]);
+  }
+
+  // ==========================================
   // BOOTSTRAP & SEED
   // ==========================================
   public async getBootstrapData() {
@@ -1047,6 +1168,7 @@ export class ServerDatabase {
       transactions,
       budgets,
       syncQueue,
+      receipts,
     ] = await Promise.all([
       this.getPlans(),
       this.getAccounts(),
@@ -1055,6 +1177,7 @@ export class ServerDatabase {
       this.getTransactions(),
       this.getBudgets(),
       this.getSyncQueue(),
+      this.getReceipts(),
     ]);
 
     return {
@@ -1066,6 +1189,7 @@ export class ServerDatabase {
       transactions,
       budgets,
       syncQueue,
+      receipts,
     };
   }
 
@@ -1080,6 +1204,7 @@ export class ServerDatabase {
       await this.driver.execute("DELETE FROM budgets;");
       await this.driver.execute("DELETE FROM sync_queue;");
       await this.driver.execute("DELETE FROM settings;");
+      await this.driver.execute("DELETE FROM receipts;");
     }
 
     await this.savePlans([DEMO_PLAN]);
@@ -1088,6 +1213,7 @@ export class ServerDatabase {
     await this.saveCategories(DEMO_CATEGORIES);
     await this.saveTransactions(DEMO_TRANSACTIONS);
     await this.saveSettings(DEMO_SETTINGS);
+    await this.saveReceipts(DEMO_RECEIPTS);
 
     await this.saveBudget({
       id: `${DEMO_PLAN_ID}:2026-09`,

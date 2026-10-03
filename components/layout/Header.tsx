@@ -14,19 +14,30 @@ import {
   PieChart,
   Receipt,
   Layers,
+  UtensilsCrossed,
 } from "lucide-react";
+
 
 export function Header() {
   const pathname = usePathname();
-  const { settings } = useYNABData();
+  const { settings, receipts } = useYNABData();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddTxOpen, setIsAddTxOpen] = useState(false);
+
+  const unresolvedCount = receipts.filter((r) => r.status === "unresolved").length;
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/budget", label: "Budget", icon: PieChart },
+    {
+      href: "/food",
+      label: "Food",
+      icon: UtensilsCrossed,
+      badge: unresolvedCount > 0 ? unresolvedCount : undefined,
+    },
     { href: "/transactions", label: "Transactions", icon: Receipt },
   ];
+
 
   return (
     <>
@@ -75,7 +86,12 @@ export function Header() {
                       }`}
                     >
                       <Icon className="w-4 h-4" />
-                      {item.label}
+                      <span>{item.label}</span>
+                      {item.badge !== undefined && (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400 text-zinc-950 shadow-xs">
+                          {item.badge}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -127,11 +143,17 @@ export function Header() {
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                {item.label}
+                <span>{item.label}</span>
+                {item.badge !== undefined && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400 text-zinc-950">
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             );
           })}
         </div>
+
       </header>
 
       {/* Modals */}

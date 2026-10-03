@@ -10,6 +10,9 @@ import {
   Category,
   TransactionDetail,
   NewTransaction,
+  TransactionClearedStatus,
+  TransactionFlagColor,
+  SaveSubTransaction,
 } from "./types";
 
 export class YNABApiClient {
@@ -197,6 +200,35 @@ export class YNABApiClient {
   }
 
   /**
+   * Update existing transaction (e.g. apply split subtransactions)
+   */
+  async updateTransaction(
+    planId: string,
+    transactionId: string,
+    transaction: {
+      account_id?: string;
+      date?: string;
+      amount?: number;
+      payee_id?: string | null;
+      payee_name?: string | null;
+      category_id?: string | null;
+      memo?: string | null;
+      cleared?: TransactionClearedStatus;
+      approved?: boolean;
+      flag_color?: TransactionFlagColor;
+      subtransactions?: SaveSubTransaction[];
+    }
+  ): Promise<{ transaction: TransactionDetail; server_knowledge: number }> {
+    return this.request<{ transaction: TransactionDetail; server_knowledge: number }>(
+      `/plans/${planId}/transactions/${transactionId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ transaction }),
+      }
+    );
+  }
+
+  /**
    * Delete transaction
    */
   async deleteTransaction(
@@ -211,3 +243,4 @@ export class YNABApiClient {
     );
   }
 }
+

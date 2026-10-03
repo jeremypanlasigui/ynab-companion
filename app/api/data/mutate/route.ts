@@ -94,6 +94,16 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true });
       }
 
+      case "SAVE_RECEIPT": {
+        await serverDb.saveReceipts([payload]);
+        return NextResponse.json({ success: true });
+      }
+
+      case "DELETE_RECEIPT": {
+        await serverDb.deleteReceipt(payload.id);
+        return NextResponse.json({ success: true });
+      }
+
       default:
         return NextResponse.json(
           { success: false, error: `Unknown mutation action: ${action}` },

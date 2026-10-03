@@ -60,6 +60,10 @@ export function useYNABData() {
     () => db.transactions.filter((t) => !t.deleted).reverse().sortBy("date"),
     []
   );
+  const receipts = useLiveQuery(
+    () => db.receipts.reverse().sortBy("created_at"),
+    []
+  );
 
   return {
     isInitialized,
@@ -69,8 +73,10 @@ export function useYNABData() {
     categories: categories || [],
     categoryGroups: categoryGroups || [],
     transactions: transactions || [],
+    receipts: receipts || [],
   };
 }
+
 
 export function useBudgetSummary(): BudgetSummary {
   const categories = useLiveQuery(

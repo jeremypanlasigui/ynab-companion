@@ -5,6 +5,8 @@ import {
   Category,
   TransactionDetail,
   AppSettings,
+  ReceiptIngestion,
+  PurchasedGood,
 } from "./types";
 
 export const DEMO_PLAN_ID = "demo-plan-mint-ynab";
@@ -191,6 +193,18 @@ export const DEMO_CATEGORIES: Category[] = [
     activity: -124500, // -$124.50 spent
     balance: 75500, // $75.50 remaining
   },
+  {
+    id: "cat-home-goods",
+    plan_id: DEMO_PLAN_ID,
+    category_group_id: "group-living",
+    category_group_name: "Everyday Expenses",
+    name: "Home Supplies & Household Goods",
+    hidden: false,
+    deleted: false,
+    budgeted: 150000, // $150.00
+    activity: -38040, // -$38.04
+    balance: 111960, // $111.96 remaining
+  },
   // Fun & Lifestyle
   {
     id: "cat-entertainment",
@@ -274,15 +288,80 @@ export const DEMO_TRANSACTIONS: TransactionDetail[] = [
     plan_id: DEMO_PLAN_ID,
     date: new Date().toISOString().slice(0, 10),
     amount: -78500, // -$78.50
-    memo: "Weekly fresh grocery run",
+    memo: "Weekly fresh grocery run + household supplies (Split)",
     cleared: "cleared",
     approved: true,
     account_id: "acc-credit-1",
     account_name: "Amex Gold Card",
     payee_name: "Trader Joe's",
-    category_id: "cat-groceries",
-    category_name: "Groceries & Supermarket",
+    category_id: null,
+    category_name: "Split (Multiple Categories)",
     deleted: false,
+    subtransactions: [
+      {
+        id: "subtx-1-fruits",
+        transaction_id: "tx-1",
+        amount: -6480, // -$6.48
+        memo: "fruits: Honeycrisp Apples, Organic Bananas",
+        category_id: "cat-groceries",
+        category_name: "Groceries & Supermarket",
+        deleted: false,
+      },
+      {
+        id: "subtx-1-veggies",
+        transaction_id: "tx-1",
+        amount: -5480, // -$5.48
+        memo: "veggies: Baby Spinach, Broccoli Florets",
+        category_id: "cat-groceries",
+        category_name: "Groceries & Supermarket",
+        deleted: false,
+      },
+      {
+        id: "subtx-1-meat",
+        transaction_id: "tx-1",
+        amount: -23980, // -$23.98
+        memo: "meat: Wild Salmon, Grass Fed Ground Beef",
+        category_id: "cat-groceries",
+        category_name: "Groceries & Supermarket",
+        deleted: false,
+      },
+      {
+        id: "subtx-1-dairy",
+        transaction_id: "tx-1",
+        amount: -8280, // -$8.28
+        memo: "dairy: Whole Milk, Greek Yogurt",
+        category_id: "cat-groceries",
+        category_name: "Groceries & Supermarket",
+        deleted: false,
+      },
+      {
+        id: "subtx-1-snacks",
+        transaction_id: "tx-1",
+        amount: -7980, // -$7.98
+        memo: "snacks: Pita Crackers, Dark Chocolate Almonds",
+        category_id: "cat-groceries",
+        category_name: "Groceries & Supermarket",
+        deleted: false,
+      },
+      {
+        id: "subtx-1-pantry",
+        transaction_id: "tx-1",
+        amount: -7280, // -$7.28
+        memo: "pantry: Pasta Sauce, Sparkling Spring Water",
+        category_id: "cat-groceries",
+        category_name: "Groceries & Supermarket",
+        deleted: false,
+      },
+      {
+        id: "subtx-1-homegoods",
+        transaction_id: "tx-1",
+        amount: -19020, // -$19.02
+        memo: "home goods: Recycled Paper Towels, Eco Dish Soap",
+        category_id: "cat-home-goods",
+        category_name: "Home Supplies & Household Goods",
+        deleted: false,
+      },
+    ],
   },
   {
     id: "tx-2",
@@ -547,3 +626,211 @@ export const DEMO_SETTINGS: AppSettings = {
     [DEMO_PLAN_ID]: ["cat-inflow", "cat-side-income", "inflow:ready-to-assign"],
   },
 };
+
+export const DEMO_RECEIPTS: ReceiptIngestion[] = [
+  {
+    id: "rcpt-demo-1",
+    plan_id: DEMO_PLAN_ID,
+    date: new Date().toISOString().slice(0, 10),
+    vendor: "Trader Joe's",
+    total_amount: -78500, // -$78.50
+    food_amount: -59480, // -$59.48
+    non_food_amount: -19020, // -$19.02
+    status: "matched",
+    matched_transaction_id: "tx-1",
+    created_at: new Date().toISOString(),
+    goods: [
+      {
+        id: "good-1",
+        receipt_id: "rcpt-demo-1",
+        name: "Honeycrisp Apples",
+        amount: -4990,
+        category: "fruits",
+        is_food: true,
+      },
+      {
+        id: "good-2",
+        receipt_id: "rcpt-demo-1",
+        name: "Organic Bananas",
+        amount: -1490,
+        category: "fruits",
+        is_food: true,
+      },
+      {
+        id: "good-3",
+        receipt_id: "rcpt-demo-1",
+        name: "Organic Baby Spinach",
+        amount: -2990,
+        category: "veggies",
+        is_food: true,
+      },
+      {
+        id: "good-4",
+        receipt_id: "rcpt-demo-1",
+        name: "Broccoli Florets",
+        amount: -2490,
+        category: "veggies",
+        is_food: true,
+      },
+      {
+        id: "good-5",
+        receipt_id: "rcpt-demo-1",
+        name: "Wild Caught Alaskan Salmon",
+        amount: -14990,
+        category: "meat",
+        is_food: true,
+      },
+      {
+        id: "good-6",
+        receipt_id: "rcpt-demo-1",
+        name: "Grass-Fed Ground Beef (85/15)",
+        amount: -8990,
+        category: "meat",
+        is_food: true,
+      },
+      {
+        id: "good-7",
+        receipt_id: "rcpt-demo-1",
+        name: "Organic Whole Milk 1 Gallon",
+        amount: -4290,
+        category: "dairy",
+        is_food: true,
+      },
+      {
+        id: "good-8",
+        receipt_id: "rcpt-demo-1",
+        name: "Plain Greek Yogurt 32oz",
+        amount: -3990,
+        category: "dairy",
+        is_food: true,
+      },
+      {
+        id: "good-9",
+        receipt_id: "rcpt-demo-1",
+        name: "Pita Bite Multigrain Crackers",
+        amount: -2990,
+        category: "snacks",
+        is_food: true,
+      },
+      {
+        id: "good-10",
+        receipt_id: "rcpt-demo-1",
+        name: "Dark Chocolate Covered Almonds",
+        amount: -4990,
+        category: "snacks",
+        is_food: true,
+      },
+      {
+        id: "good-11",
+        receipt_id: "rcpt-demo-1",
+        name: "Organic Tomato Basil Marinara",
+        amount: -3290,
+        category: "pantry",
+        is_food: true,
+      },
+      {
+        id: "good-12",
+        receipt_id: "rcpt-demo-1",
+        name: "Sparkling Mineral Water 1L",
+        amount: -3990,
+        category: "beverages",
+        is_food: true,
+      },
+      {
+        id: "good-13",
+        receipt_id: "rcpt-demo-1",
+        name: "100% Recycled Paper Towels 3pk",
+        amount: -13990,
+        category: "home goods",
+        is_food: false,
+      },
+      {
+        id: "good-14",
+        receipt_id: "rcpt-demo-1",
+        name: "Eco Citrus Dish Soap 25oz",
+        amount: -5030,
+        category: "home goods",
+        is_food: false,
+      },
+    ],
+  },
+  {
+    id: "rcpt-demo-2",
+    plan_id: DEMO_PLAN_ID,
+    date: new Date().toISOString().slice(0, 10),
+    vendor: "Target",
+    total_amount: -64200, // -$64.20
+    food_amount: -23750, // -$23.75
+    non_food_amount: -40450, // -$40.45
+    status: "unresolved", // Pending transaction match from bank
+    matched_transaction_id: null,
+    created_at: new Date().toISOString(),
+    goods: [
+      {
+        id: "good-201",
+        receipt_id: "rcpt-demo-2",
+        name: "Organic Fresh Strawberries 1lb",
+        amount: -3990,
+        category: "fruits",
+        is_food: true,
+      },
+      {
+        id: "good-202",
+        receipt_id: "rcpt-demo-2",
+        name: "Organic Baby Carrots 16oz",
+        amount: -1990,
+        category: "veggies",
+        is_food: true,
+      },
+      {
+        id: "good-203",
+        receipt_id: "rcpt-demo-2",
+        name: "Seasoned Rotisserie Chicken",
+        amount: -8990,
+        category: "meat",
+        is_food: true,
+      },
+      {
+        id: "good-204",
+        receipt_id: "rcpt-demo-2",
+        name: "Sharp Cheddar Cheese Block",
+        amount: -4490,
+        category: "dairy",
+        is_food: true,
+      },
+      {
+        id: "good-205",
+        receipt_id: "rcpt-demo-2",
+        name: "Sea Salt Kettle Cooked Potato Chips",
+        amount: -4290,
+        category: "snacks",
+        is_food: true,
+      },
+      {
+        id: "good-206",
+        receipt_id: "rcpt-demo-2",
+        name: "Clorox Disinfecting Wipes 3pk",
+        amount: -12490,
+        category: "home goods",
+        is_food: false,
+      },
+      {
+        id: "good-207",
+        receipt_id: "rcpt-demo-2",
+        name: "Tide Pods Spring Meadow 42ct",
+        amount: -21990,
+        category: "home goods",
+        is_food: false,
+      },
+      {
+        id: "good-208",
+        receipt_id: "rcpt-demo-2",
+        name: "Ziploc Gallon Storage Slider Bags",
+        amount: -5970,
+        category: "home goods",
+        is_food: false,
+      },
+    ],
+  },
+];
+
