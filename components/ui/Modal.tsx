@@ -10,6 +10,7 @@ interface ModalProps {
   description?: string;
   children: ReactNode;
   maxWidth?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "4xl" | "5xl" | "6xl";
+  zIndex?: string;
 }
 
 export function Modal({
@@ -19,6 +20,7 @@ export function Modal({
   description,
   children,
   maxWidth = "md",
+  zIndex = "z-50",
 }: ModalProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -52,7 +54,7 @@ export function Modal({
 
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={`fixed inset-0 ${zIndex} flex items-center justify-center p-4`}>
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in"

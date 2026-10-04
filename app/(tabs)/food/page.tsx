@@ -11,9 +11,11 @@ import {
   ResolveReceiptModal,
   ReceiptHistoryTable,
   FoodSpendBreakdownModal,
+  SubCategoryDetailModal,
+  EditReceiptModal,
 } from "@/components/ynab/food";
 import { calculateFoodSpend } from "@/lib/food/food-spend-utils";
-import { ReceiptIngestion } from "@/lib/ynab/types";
+import { ReceiptIngestion, FoodSubCategory } from "@/lib/ynab/types";
 import { PlusCircle, Calendar, UtensilsCrossed } from "lucide-react";
 
 export default function FoodBudgetPage() {
@@ -31,7 +33,9 @@ export default function FoodBudgetPage() {
   );
   const [isIngestionOpen, setIsIngestionOpen] = useState(false);
   const [receiptToResolve, setReceiptToResolve] = useState<ReceiptIngestion | null>(null);
+  const [receiptToEdit, setReceiptToEdit] = useState<ReceiptIngestion | null>(null);
   const [isBreakdownOpen, setIsBreakdownOpen] = useState(false);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<FoodSubCategory | null>(null);
 
   const activePlanId = settings?.selected_plan_id || "default";
 
@@ -127,7 +131,9 @@ export default function FoodBudgetPage() {
       {/* 3. Sub-Category Distribution */}
       <SubCategoryDistribution
         receipts={receipts}
+        transactions={transactions}
         currentMonth={currentMonth}
+        onSelectCategory={(category) => setSelectedSubCategory(category)}
       />
 
       {/* 4. Receipt History & Itemized Goods */}
@@ -135,6 +141,7 @@ export default function FoodBudgetPage() {
         receipts={receipts}
         onResolve={(r) => setReceiptToResolve(r)}
         onDelete={handleDeleteReceipt}
+        onEdit={(r) => setReceiptToEdit(r)}
       />
 
       {/* Modals */}
@@ -166,6 +173,35 @@ export default function FoodBudgetPage() {
         contributingTransactions={foodSpendSummary.contributingTransactions}
         categories={categories}
         accounts={accounts}
+        onResolveReceipt={(r) => setReceiptToResolve(r)}
+        onEditReceipt={(r) => setReceiptToEdit(r)}
+      />
+
+      {/* Sub-Category Detail Modal */}
+      <SubCategoryDetailModal
+        isOpen={Boolean(selectedSubCategory)}
+        onClose={() => setSelectedSubCategory(null)}
+        categoryKey={selectedSubCategory}
+        currentMonth={currentMonth}
+        totalFoodSpend={foodSpendSummary.totalFoodSpend}
+        receipts={receipts}
+        transactions={transactions}
+        onEditReceipt={(r) => setReceiptToEdit(r)}
+      />
+
+      {/* Edit Receipt Modal */}
+      <EditReceiptModal
+        isOpen={Boolean(receiptToEdit)}
+        onClose={() => setReceiptToEdit(null)}
+        receipt={receiptToEdit}
+        categories={categories}
+        transactions={transactions}
+        onReceiptUpdated={(updated) => {
+          // If the currently edited receipt is also in active view, update it
+          if (receiptToResolve?.id === updated.id) {
+            setReceiptToResolve(updated);
+          }
+        }}
       />
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { TransactionDetail, Category, Account, SubTransaction } from "@/lib/ynab/types";
+import { TransactionDetail, Category, Account, SubTransaction, ReceiptIngestion } from "@/lib/ynab/types";
 import { formatCurrency } from "@/lib/ynab/utils";
 import { ContributingTransaction } from "@/lib/food/food-spend-utils";
 import { ItemPriceInput } from "./ItemPriceInput";
@@ -20,6 +20,8 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  Receipt,
+  Link2,
 } from "lucide-react";
 
 interface FoodSpendBreakdownModalProps {
@@ -31,6 +33,8 @@ interface FoodSpendBreakdownModalProps {
   contributingTransactions: ContributingTransaction[];
   categories: Category[];
   accounts: Account[];
+  onResolveReceipt?: (receipt: ReceiptIngestion) => void;
+  onEditReceipt?: (receipt: ReceiptIngestion) => void;
 }
 
 export function FoodSpendBreakdownModal({
@@ -42,11 +46,13 @@ export function FoodSpendBreakdownModal({
   contributingTransactions,
   categories,
   accounts,
+  onResolveReceipt,
+  onEditReceipt,
 }: FoodSpendBreakdownModalProps) {
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<TransactionDetail | null>(null);
   const [expandedTxIds, setExpandedTxIds] = useState<Set<string>>(
-    () => new Set(contributingTransactions.map((c) => c.transaction.id))
+    () => new Set(contributingTransactions.map((c) => c.id))
   );
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
@@ -114,6 +120,25 @@ export function FoodSpendBreakdownModal({
     } catch (err) {
       console.error("Failed to delete transaction:", err);
       alert("Failed to delete transaction.");
+    } finally {
+      setIsDeletingId(null);
+    }
+  };
+
+  const handleDeleteReceipt = async (receiptId: string, vendorName?: string) => {
+    const confirmed = confirm(
+      `Are you sure you want to delete the pending receipt from "${vendorName || "Store"}"? This will remove its contribution from your food budget.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsDeletingId(receiptId);
+      await db.deleteReceipt(receiptId);
+      setFeedbackMessage("Pending receipt successfully deleted.");
+      setTimeout(() => setFeedbackMessage(null), 3500);
+    } catch (err) {
+      console.error("Failed to delete receipt:", err);
+      alert("Failed to delete receipt.");
     } finally {
       setIsDeletingId(null);
     }
@@ -208,28 +233,33 @@ export function FoodSpendBreakdownModal({
           ) : (
             contributingTransactions.map((item) => {
               const tx = item.transaction;
-              const isEditing = editingTxId === tx.id;
-              const isExpanded = expandedTxIds.has(tx.id);
-              const isSplit = Boolean(tx.subtransactions && tx.subtransactions.length > 0);
+              const isEditing = editingTxId === item.id;
+              const isExpanded = expandedTxIds.has(item.id);
+              const isSplit = Boolean(tx && tx.subtransactions && tx.subtransactions.length > 0);
+              const hasExpandableContent =
+                isSplit ||
+                (item.isPendingReceipt && Boolean(item.itemsBreakdown && item.itemsBreakdown.length > 0));
 
               return (
                 <div
-                  key={tx.id}
+                  key={item.id}
                   className={`rounded-2xl border transition-all ${
                     isEditing
                       ? "border-teal-500/60 bg-zinc-900/90 shadow-lg shadow-teal-500/10"
+                      : item.isPendingReceipt
+                      ? "border-amber-500/30 bg-amber-500/5 hover:border-amber-500/50"
                       : "border-zinc-800 bg-zinc-950/60 hover:border-zinc-700/80"
                   }`}
                 >
-                  {/* Transaction Row Header */}
+                  {/* Transaction / Receipt Row Header */}
                   <div className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-start sm:items-center gap-3 min-w-0">
-                      {isSplit && (
+                      {hasExpandableContent && (
                         <button
                           type="button"
-                          onClick={() => toggleExpand(tx.id)}
+                          onClick={() => toggleExpand(item.id)}
                           className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 cursor-pointer mt-0.5 sm:mt-0"
-                          title={isExpanded ? "Collapse subtransactions" : "Expand subtransactions"}
+                          title={isExpanded ? "Collapse items" : "Expand items"}
                         >
                           {isExpanded ? (
                             <ChevronUp className="w-4 h-4 text-teal-400" />
@@ -242,15 +272,20 @@ export function FoodSpendBreakdownModal({
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-bold text-white truncate">
-                            {tx.payee_name || "Uncategorized Payee"}
+                            {item.payeeName}
                           </span>
-                          {isSplit && (
+                          {item.isPendingReceipt ? (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              <Receipt className="w-3 h-3" />
+                              <span>Pending Receipt ({item.itemsBreakdown?.length || 0} items)</span>
+                            </span>
+                          ) : isSplit ? (
                             <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/30">
                               <Layers className="w-3 h-3" />
-                              <span>Split ({tx.subtransactions?.length} parts)</span>
+                              <span>Split ({tx?.subtransactions?.length} parts)</span>
                             </span>
-                          )}
-                          {item.linkedReceipt && (
+                          ) : null}
+                          {item.linkedReceipt && !item.isPendingReceipt && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-teal-500/10 text-teal-300 border border-teal-500/30">
                               Receipt Linked
                             </span>
@@ -260,17 +295,17 @@ export function FoodSpendBreakdownModal({
                         <div className="flex items-center gap-2 text-[11px] text-zinc-400 mt-0.5 flex-wrap">
                           <span className="flex items-center gap-1 font-mono">
                             <Calendar className="w-3 h-3 text-zinc-500" />
-                            {tx.date}
+                            {item.date}
                           </span>
                           <span>•</span>
-                          <span className="truncate">{tx.account_name}</span>
-                          {!isSplit && tx.category_name && (
+                          <span className="truncate">{item.accountName || "Bank Transaction"}</span>
+                          {!isSplit && !item.isPendingReceipt && tx?.category_name && (
                             <>
                               <span>•</span>
                               <span className="text-teal-400/90 truncate">{tx.category_name}</span>
                             </>
                           )}
-                          {tx.memo && (
+                          {!item.isPendingReceipt && tx?.memo && (
                             <>
                               <span>•</span>
                               <span className="text-zinc-500 italic truncate max-w-[200px]">
@@ -288,7 +323,7 @@ export function FoodSpendBreakdownModal({
                         <div className="flex items-baseline gap-1.5 justify-end">
                           <span className="text-[10px] text-zinc-400">Total:</span>
                           <span className="font-mono text-sm font-bold text-white">
-                            {formatCurrency(tx.amount)}
+                            {formatCurrency(item.totalAmount)}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 text-[11px] justify-end">
@@ -305,8 +340,56 @@ export function FoodSpendBreakdownModal({
 
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
-                        {!isEditing ? (
+                        {item.isPendingReceipt ? (
                           <>
+                            {onEditReceipt && item.receipt && (
+                              <button
+                                type="button"
+                                onClick={() => onEditReceipt(item.receipt!)}
+                                title="Edit receipt line items & prices"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 border border-teal-500/40 transition-colors cursor-pointer"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span className="hidden sm:inline">Edit</span>
+                              </button>
+                            )}
+                            {onResolveReceipt && item.receipt && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onClose();
+                                  onResolveReceipt(item.receipt!);
+                                }}
+                                title="Match receipt to a bank transaction"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 transition-colors cursor-pointer"
+                              >
+                                <Link2 className="w-3 h-3" />
+                                <span className="hidden sm:inline">Match</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteReceipt(item.id, item.payeeName)}
+                              disabled={isDeletingId === item.id}
+                              title="Delete pending receipt"
+                              className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer disabled:opacity-40"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        ) : !isEditing && tx ? (
+                          <>
+                            {onEditReceipt && item.linkedReceipt && (
+                              <button
+                                type="button"
+                                onClick={() => onEditReceipt(item.linkedReceipt!)}
+                                title="Edit linked receipt"
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-teal-500/15 text-teal-300 hover:bg-teal-500/25 border border-teal-500/30 transition-colors cursor-pointer mr-1"
+                              >
+                                <Receipt className="w-3 h-3" />
+                                <span className="hidden sm:inline">Receipt</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleStartEdit(tx)}
@@ -349,6 +432,43 @@ export function FoodSpendBreakdownModal({
                       </div>
                     </div>
                   </div>
+
+                  {/* PENDING RECEIPT EXPANDED ITEMS */}
+                  {item.isPendingReceipt && isExpanded && item.itemsBreakdown && (
+                    <div className="border-t border-zinc-800/80 bg-zinc-950/40 p-3 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-400 pb-1">
+                        <span>Parsed Receipt Line Items ({item.itemsBreakdown.length})</span>
+                        <span className="text-[10px] text-zinc-500">
+                          🟢 Food Spend &bull; 🟣 Home Goods
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                        {item.itemsBreakdown.map((good) => (
+                          <div
+                            key={good.id}
+                            className={`flex items-center justify-between gap-2 p-2 rounded-xl border text-xs ${
+                              good.is_food
+                                ? "border-teal-500/20 bg-teal-500/5 text-teal-200"
+                                : "border-purple-500/20 bg-purple-500/5 text-purple-200"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-semibold text-white truncate">
+                                {good.name}
+                              </span>
+                              <span className="px-1.5 py-0.2 rounded-md text-[9px] font-semibold bg-zinc-800 text-zinc-300 uppercase">
+                                {good.category}
+                              </span>
+                            </div>
+                            <span className="font-mono font-bold text-white shrink-0">
+                              {formatCurrency(good.amount)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* EDIT MODE: Transaction Top Fields */}
                   {isEditing && editForm && (
@@ -410,7 +530,7 @@ export function FoodSpendBreakdownModal({
                   )}
 
                   {/* Subtransactions Breakdown Section */}
-                  {isSplit && isExpanded && (
+                  {isSplit && tx && isExpanded && (
                     <div className="border-t border-zinc-800/80 bg-zinc-950/40 p-3 space-y-2">
                       <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-400 pb-1">
                         <span>Subtransactions ({tx.subtransactions?.length})</span>

@@ -10,18 +10,21 @@ import {
   AlertCircle,
   Trash2,
   ArrowUpRight,
+  Edit3,
 } from "lucide-react";
 
 interface ReceiptHistoryTableProps {
   receipts: ReceiptIngestion[];
   onResolve: (receipt: ReceiptIngestion) => void;
   onDelete: (receiptId: string) => void;
+  onEdit?: (receipt: ReceiptIngestion) => void;
 }
 
 export function ReceiptHistoryTable({
   receipts,
   onResolve,
   onDelete,
+  onEdit,
 }: ReceiptHistoryTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -38,38 +41,34 @@ export function ReceiptHistoryTable({
       <div className="p-5 sm:p-6 border-b border-zinc-800/80 flex items-center justify-between">
         <div>
           <h3 className="text-base font-bold text-white tracking-tight">
-            Ingested Receipts & Itemized Goods
+            Ingested Receipts & Itemization History
           </h3>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Click on any receipt to inspect individual PurchasedGood items and subcategory splits
+            Audit OCR line items, edit details, and track matching status with YNAB transactions
           </p>
         </div>
-        <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-zinc-800 text-zinc-300">
+        <span className="text-xs font-mono px-3 py-1 rounded-full bg-zinc-800 text-zinc-300">
           {receipts.length} {receipts.length === 1 ? "receipt" : "receipts"}
         </span>
       </div>
 
-      <div className="divide-y divide-zinc-800/70">
+      <div className="divide-y divide-zinc-800/80">
         {receipts.map((receipt) => {
           const isExpanded = expandedId === receipt.id;
           const isMatched = receipt.status === "matched";
 
           return (
-            <div key={receipt.id} className="transition-colors hover:bg-zinc-900/40">
-              {/* Receipt Row Header */}
+            <div key={receipt.id} className="transition-colors hover:bg-zinc-800/20">
               <div
                 onClick={() => toggleExpand(receipt.id)}
-                className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none"
+                className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer select-none"
               >
                 <div className="flex items-center gap-3">
-                  <button
-                    className="p-1 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-                    aria-label="Toggle details"
-                  >
+                  <button className="text-zinc-500 hover:text-zinc-300 transition-colors">
                     {isExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-teal-400" />
+                      <ChevronDown className="w-5 h-5 text-teal-400" />
                     ) : (
-                      <ChevronRight className="w-4 h-4" />
+                      <ChevronRight className="w-5 h-5" />
                     )}
                   </button>
 
@@ -116,6 +115,15 @@ export function ReceiptHistoryTable({
 
                   {/* Actions */}
                   <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    {onEdit && (
+                      <button
+                        onClick={() => onEdit(receipt)}
+                        title="Edit Receipt"
+                        className="p-1.5 rounded-xl text-zinc-400 hover:text-teal-300 hover:bg-teal-500/10 transition-colors cursor-pointer"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     {!isMatched && (
                       <button
                         onClick={() => onResolve(receipt)}

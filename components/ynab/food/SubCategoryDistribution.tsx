@@ -2,11 +2,15 @@
 
 import { useMemo } from "react";
 import { formatCurrency } from "@/lib/ynab/utils";
-import { ReceiptIngestion, FoodSubCategory } from "@/lib/ynab/types";
+import { ReceiptIngestion, TransactionDetail, FoodSubCategory } from "@/lib/ynab/types";
+import { getSubCategoryBreakdown } from "@/lib/food/food-spend-utils";
+import { ChevronRight } from "lucide-react";
 
 interface SubCategoryDistributionProps {
   receipts: ReceiptIngestion[];
+  transactions?: TransactionDetail[];
   currentMonth: string; // 'YYYY-MM'
+  onSelectCategory?: (category: FoodSubCategory) => void;
 }
 
 interface CategoryStat {
@@ -40,55 +44,52 @@ const META: Record<
 
 export function SubCategoryDistribution({
   receipts,
+  transactions = [],
   currentMonth,
+  onSelectCategory,
 }: SubCategoryDistributionProps) {
   const stats = useMemo(() => {
-    // Collect all purchased goods from receipts in this month
-    const monthReceipts = receipts.filter((r) => r.date.startsWith(currentMonth));
-    const allGoods = monthReceipts.flatMap((r) => r.goods || []);
-
-    const amounts: Partial<Record<FoodSubCategory, { total: number; count: number }>> = {};
-
     let grandTotalFood = 0;
 
-    allGoods.forEach((g) => {
-      const cat = g.category || "other";
-      if (!amounts[cat]) {
-        amounts[cat] = { total: 0, count: 0 };
-      }
-      amounts[cat]!.total += Math.abs(g.amount);
-      amounts[cat]!.count += 1;
-
-      if (g.is_food) {
-        grandTotalFood += Math.abs(g.amount);
-      }
-    });
-
-    const result: CategoryStat[] = (Object.keys(META) as FoodSubCategory[])
+    const list: CategoryStat[] = (Object.keys(META) as FoodSubCategory[])
       .map((catKey) => {
+        const data = getSubCategoryBreakdown(
+          catKey,
+          receipts,
+          transactions,
+          currentMonth,
+          0
+        );
         const info = META[catKey];
-        const data = amounts[catKey] || { total: 0, count: 0 };
-        const percentage =
-          grandTotalFood > 0 && catKey !== "home goods"
-            ? Math.round((data.total / grandTotalFood) * 100)
-            : 0;
-
         return {
           key: catKey,
           label: info.label,
           emoji: info.emoji,
           color: info.color,
           barColor: info.barColor,
-          totalAmount: data.total,
-          itemCount: data.count,
-          percentage,
+          totalAmount: data.totalAmount,
+          itemCount: data.itemCount,
+          percentage: 0,
         };
       })
-      .filter((s) => s.totalAmount > 0)
-      .sort((a, b) => b.totalAmount - a.totalAmount);
+      .filter((s) => s.totalAmount > 0);
 
-    return { result, grandTotalFood };
-  }, [receipts, currentMonth]);
+    list.forEach((s) => {
+      if (s.key !== "home goods") {
+        grandTotalFood += s.totalAmount;
+      }
+    });
+
+    list.forEach((s) => {
+      s.percentage =
+        grandTotalFood > 0 && s.key !== "home goods"
+          ? Math.round((s.totalAmount / grandTotalFood) * 100)
+          : 0;
+    });
+
+    list.sort((a, b) => b.totalAmount - a.totalAmount);
+    return { result: list, grandTotalFood };
+  }, [receipts, transactions, currentMonth]);
 
   if (stats.result.length === 0) {
     return (
@@ -113,7 +114,7 @@ export function SubCategoryDistribution({
             </span>
           </h3>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Memo-ized sub-transactions extracted from your grocery runs
+            Click into any category to view individual items and store runs
           </p>
         </div>
         <div className="text-right">
@@ -126,24 +127,31 @@ export function SubCategoryDistribution({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {stats.result.map((stat) => (
-          <div
+          <button
             key={stat.key}
-            className="p-3.5 rounded-2xl border border-zinc-800/80 bg-zinc-950/40 hover:border-zinc-700/80 transition-all"
+            type="button"
+            onClick={() => onSelectCategory?.(stat.key)}
+            className="w-full text-left p-3.5 rounded-2xl border border-zinc-800/80 bg-zinc-950/40 hover:border-teal-500/50 hover:bg-zinc-900/60 transition-all group cursor-pointer active:scale-[0.99] focus:outline-none focus:ring-1 focus:ring-teal-500/50"
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-lg">{stat.emoji}</span>
+                <span className="text-lg group-hover:scale-110 transition-transform">{stat.emoji}</span>
                 <div>
-                  <span className="text-xs font-semibold text-zinc-200 block">
-                    {stat.label}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-zinc-200 group-hover:text-teal-300 transition-colors block">
+                      {stat.label}
+                    </span>
+                    <span className="opacity-0 group-hover:opacity-100 text-[10px] text-teal-400 font-medium transition-opacity flex items-center">
+                      Details <ChevronRight className="w-3 h-3 ml-0.5" />
+                    </span>
+                  </div>
                   <span className="text-[10px] text-zinc-500">
                     {stat.itemCount} {stat.itemCount === 1 ? "item" : "items"}
                   </span>
                 </div>
               </div>
               <div className="text-right">
-                <span className="font-mono text-xs font-bold text-white block">
+                <span className="font-mono text-xs font-bold text-white block group-hover:text-teal-200 transition-colors">
                   {formatCurrency(-stat.totalAmount)}
                 </span>
                 {stat.key !== "home goods" ? (
@@ -167,7 +175,7 @@ export function SubCategoryDistribution({
                 }}
               />
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </div>

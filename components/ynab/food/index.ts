@@ -5,4 +5,6 @@ export * from "./ReceiptIngestionModal";
 export * from "./ResolveReceiptModal";
 export * from "./ReceiptHistoryTable";
 export * from "./FoodSpendBreakdownModal";
+export * from "./SubCategoryDetailModal";
 export * from "./ItemPriceInput";
+export * from "./EditReceiptModal";
