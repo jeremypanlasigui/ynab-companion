@@ -434,6 +434,52 @@ export class YNABDatabase extends Dexie {
   }
 
   /**
+   * Optimistically update an existing transaction and persist to Dexie and SQLite
+   */
+  async updateTransaction(tx: TransactionDetail) {
+    const settings = await this.settings.get("app_settings");
+    const activePlanId = tx.plan_id || settings?.selected_plan_id || DEMO_PLAN_ID;
+
+    await this.transaction("rw", [this.transactions, this.syncQueue], async () => {
+      await this.transactions.put(tx);
+
+      if (settings && !settings.is_demo_mode && settings.api_token && !tx.is_local) {
+        const queueItem: SyncQueueItem = {
+          type: "UPDATE_TRANSACTION",
+          payload: {
+            plan_id: activePlanId,
+            transaction_id: tx.id,
+            transaction: {
+              account_id: tx.account_id,
+              date: tx.date,
+              amount: tx.amount,
+              payee_id: tx.payee_id,
+              payee_name: tx.payee_name,
+              category_id: tx.category_id,
+              memo: tx.memo,
+              cleared: tx.cleared,
+              approved: tx.approved,
+              flag_color: tx.flag_color,
+              subtransactions: tx.subtransactions?.map((st) => ({
+                amount: st.amount,
+                category_id: st.category_id,
+                memo: st.memo,
+                payee_name: st.payee_name,
+              })),
+            },
+          },
+          createdAt: new Date().toISOString(),
+          attempts: 0,
+        };
+        await this.syncQueue.add(queueItem);
+        postMutation("ADD_SYNC_QUEUE", queueItem);
+      }
+    });
+
+    postMutation("SAVE_TRANSACTION", tx);
+  }
+
+  /**
    * Persist configured income categories for a plan into AppSettings and sync to SQLite
    */
   async saveIncomeCategories(planId: string, categoryIds: string[]) {

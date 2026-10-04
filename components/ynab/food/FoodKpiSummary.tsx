@@ -3,13 +3,15 @@
 import { useMemo } from "react";
 import { formatCurrency } from "@/lib/ynab/utils";
 import { TransactionDetail, ReceiptIngestion, Category } from "@/lib/ynab/types";
-import { Utensils, ShieldCheck, ShoppingBag, Coffee } from "lucide-react";
+import { calculateFoodSpend } from "@/lib/food/food-spend-utils";
+import { Utensils, ShieldCheck, ShoppingBag, Coffee, ArrowUpRight } from "lucide-react";
 
 interface FoodKpiSummaryProps {
   transactions: TransactionDetail[];
   receipts: ReceiptIngestion[];
   categories: Category[];
   currentMonth: string; // 'YYYY-MM'
+  onOpenBreakdown?: () => void;
 }
 
 export function FoodKpiSummary({
@@ -17,112 +19,57 @@ export function FoodKpiSummary({
   receipts,
   categories,
   currentMonth,
+  onOpenBreakdown,
 }: FoodKpiSummaryProps) {
   const calculations = useMemo(() => {
-    // 1. Find grocery and dining categories
-    const groceryCategories = categories.filter((c) => {
-      const name = c.name.toLowerCase();
-      return name.includes("grocer") || name.includes("supermarket") || name.includes("food");
-    });
-    const groceryCatIds = new Set(groceryCategories.map((c) => c.id));
-
-    const diningCategories = categories.filter((c) => {
-      const name = c.name.toLowerCase();
-      return name.includes("dining") || name.includes("restaurant") || name.includes("takeout") || name.includes("coffee");
-    });
-    const diningCatIds = new Set(diningCategories.map((c) => c.id));
-
-    // 2. Filter transactions for the current month
-    const monthTxs = transactions.filter((t) => {
-      if (t.deleted) return false;
-      return t.date.startsWith(currentMonth);
-    });
-
-    let grocerySpend = 0;
-    let diningSpend = 0;
-    let homeGoodsFiltered = 0;
-
-    monthTxs.forEach((t) => {
-      // If transaction has subtransactions (split)
-      if (t.subtransactions && t.subtransactions.length > 0) {
-        t.subtransactions.forEach((st) => {
-          if (st.deleted) return;
-          const memoLower = (st.memo || "").toLowerCase();
-          const isHomeGoods =
-            memoLower.includes("home goods") ||
-            memoLower.includes("household") ||
-            (st.category_name || "").toLowerCase().includes("home");
-
-          if (isHomeGoods) {
-            homeGoodsFiltered += Math.abs(st.amount);
-          } else if (st.category_id && groceryCatIds.has(st.category_id)) {
-            grocerySpend += Math.abs(st.amount);
-          } else if (st.category_id && diningCatIds.has(st.category_id)) {
-            diningSpend += Math.abs(st.amount);
-          } else if (memoLower.includes("fruit") || memoLower.includes("meat") || memoLower.includes("veggie") || memoLower.includes("snack") || memoLower.includes("dairy")) {
-            grocerySpend += Math.abs(st.amount);
-          }
-        });
-      } else {
-        // Normal non-split transaction
-        if (t.category_id && groceryCatIds.has(t.category_id)) {
-          // If a matched receipt exists, take only the pure food amount!
-          const linkedReceipt = receipts.find((r) => r.matched_transaction_id === t.id);
-          if (linkedReceipt && linkedReceipt.non_food_amount < 0) {
-            homeGoodsFiltered += Math.abs(linkedReceipt.non_food_amount);
-            grocerySpend += Math.abs(linkedReceipt.food_amount);
-          } else {
-            grocerySpend += Math.abs(t.amount);
-          }
-        } else if (t.category_id && diningCatIds.has(t.category_id)) {
-          diningSpend += Math.abs(t.amount);
-        }
-      }
-    });
-
-    // Also include home goods filtered from unlinked receipts this month
-    const monthReceipts = receipts.filter((r) => r.date.startsWith(currentMonth));
-    monthReceipts.forEach((r) => {
-      if (r.status === "unresolved" && r.non_food_amount < 0) {
-        homeGoodsFiltered += Math.abs(r.non_food_amount);
-      }
-    });
-
-    const totalFoodSpend = grocerySpend + diningSpend;
-
-    // Budgeted food target
-    let budgetedFood = 0;
-    groceryCategories.forEach((c) => (budgetedFood += c.budgeted || 0));
-    diningCategories.forEach((c) => (budgetedFood += c.budgeted || 0));
-
-    const percentUsed = budgetedFood > 0 ? Math.round((totalFoodSpend / budgetedFood) * 100) : 0;
-
-    return {
-      totalFoodSpend,
-      grocerySpend,
-      diningSpend,
-      homeGoodsFiltered,
-      budgetedFood,
-      percentUsed,
-    };
+    return calculateFoodSpend(transactions, receipts, categories, currentMonth);
   }, [transactions, receipts, categories, currentMonth]);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      {/* 1. Total Food Spend */}
-      <div className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-xs transition-all hover:border-zinc-700/80">
+      {/* 1. Total Food Spend (Clickable for drill-down breakdown) */}
+      <div
+        onClick={onOpenBreakdown}
+        role={onOpenBreakdown ? "button" : undefined}
+        tabIndex={onOpenBreakdown ? 0 : undefined}
+        onKeyDown={(e) => {
+          if (onOpenBreakdown && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            onOpenBreakdown();
+          }
+        }}
+        className={`rounded-3xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-xs transition-all ${
+          onOpenBreakdown
+            ? "cursor-pointer hover:border-teal-500/60 hover:bg-zinc-900/90 hover:shadow-lg hover:shadow-teal-500/10 group focus:outline-none focus:ring-1 focus:ring-teal-500"
+            : "hover:border-zinc-700/80"
+        }`}
+      >
         <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-semibold text-zinc-400">Total Food Spend</span>
-          <div className="w-8 h-8 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-zinc-400 group-hover:text-zinc-200 transition-colors">
+              Total Food Spend
+            </span>
+            {onOpenBreakdown && (
+              <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-teal-400 font-semibold flex items-center">
+                <ArrowUpRight className="w-3 h-3" />
+              </span>
+            )}
+          </div>
+          <div className="w-8 h-8 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 group-hover:bg-teal-500/20 transition-all">
             <Utensils className="w-4 h-4" />
           </div>
         </div>
-        <div className="font-mono text-2xl font-black text-white tracking-tight">
+        <div className="font-mono text-2xl font-black text-white tracking-tight group-hover:text-teal-300 transition-colors">
           {formatCurrency(-calculations.totalFoodSpend)}
         </div>
-        <p className="text-[11px] text-zinc-400 mt-1">
-          Groceries + Dining out (excl. home goods)
-        </p>
+        <div className="flex items-center justify-between mt-1 text-[11px] text-zinc-400">
+          <span>Groceries + Dining out</span>
+          {onOpenBreakdown && (
+            <span className="text-[10px] font-semibold text-teal-400/80 group-hover:text-teal-300 transition-colors">
+              Inspect & adjust &rarr;
+            </span>
+          )}
+        </div>
       </div>
 
       {/* 2. Non-Food Home Goods Filtered Out */}

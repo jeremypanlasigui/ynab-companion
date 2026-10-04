@@ -10,7 +10,9 @@ import {
   ReceiptIngestionModal,
   ResolveReceiptModal,
   ReceiptHistoryTable,
+  FoodSpendBreakdownModal,
 } from "@/components/ynab/food";
+import { calculateFoodSpend } from "@/lib/food/food-spend-utils";
 import { ReceiptIngestion } from "@/lib/ynab/types";
 import { PlusCircle, Calendar, UtensilsCrossed } from "lucide-react";
 
@@ -29,8 +31,15 @@ export default function FoodBudgetPage() {
   );
   const [isIngestionOpen, setIsIngestionOpen] = useState(false);
   const [receiptToResolve, setReceiptToResolve] = useState<ReceiptIngestion | null>(null);
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false);
 
   const activePlanId = settings?.selected_plan_id || "default";
+
+  // Detailed breakdown of food spend & contributing transactions for current month
+  const foodSpendSummary = useMemo(
+    () => calculateFoodSpend(transactions, receipts, categories, currentMonth),
+    [transactions, receipts, categories, currentMonth]
+  );
 
   // Unresolved receipts that need attention
   const unresolvedReceipts = useMemo(
@@ -112,6 +121,7 @@ export default function FoodBudgetPage() {
         receipts={receipts}
         categories={categories}
         currentMonth={currentMonth}
+        onOpenBreakdown={() => setIsBreakdownOpen(true)}
       />
 
       {/* 3. Sub-Category Distribution */}
@@ -144,6 +154,18 @@ export default function FoodBudgetPage() {
         accounts={accounts}
         categories={categories}
         planId={activePlanId}
+      />
+
+      {/* Food Spend Drill-Down Breakdown Modal */}
+      <FoodSpendBreakdownModal
+        isOpen={isBreakdownOpen}
+        onClose={() => setIsBreakdownOpen(false)}
+        currentMonth={currentMonth}
+        totalFoodSpend={foodSpendSummary.totalFoodSpend}
+        homeGoodsFiltered={foodSpendSummary.homeGoodsFiltered}
+        contributingTransactions={foodSpendSummary.contributingTransactions}
+        categories={categories}
+        accounts={accounts}
       />
     </div>
   );
