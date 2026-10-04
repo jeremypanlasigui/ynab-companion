@@ -32,6 +32,8 @@ const META: Record<
   pantry: { label: "Pantry & Staples", emoji: "🥫", color: "text-teal-400", barColor: "bg-teal-500" },
   beverages: { label: "Beverages", emoji: "🥤", color: "text-blue-400", barColor: "bg-blue-500" },
   prepared: { label: "Prepared & Deli", emoji: "🍱", color: "text-indigo-400", barColor: "bg-indigo-500" },
+  tax: { label: "Sales Tax", emoji: "🧾", color: "text-slate-300", barColor: "bg-slate-400" },
+  "ca crv": { label: "CA CRV (Bottle Deposit)", emoji: "♻️", color: "text-cyan-400", barColor: "bg-cyan-500" },
   "home goods": { label: "Home Goods (Non-Food)", emoji: "🧻", color: "text-zinc-400", barColor: "bg-zinc-600" },
   other: { label: "Other", emoji: "🏷️", color: "text-zinc-300", barColor: "bg-zinc-500" },
 };

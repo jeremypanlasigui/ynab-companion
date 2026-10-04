@@ -240,8 +240,17 @@ export type FoodSubCategory =
   | "pantry"
   | "beverages"
   | "prepared"
+  | "tax"
+  | "ca crv"
   | "home goods"
   | "other";
+
+export interface BoundingBox {
+  x0: number; // percentage 0-100 across image width
+  y0: number; // percentage 0-100 across image height
+  x1: number;
+  y1: number;
+}
 
 export interface PurchasedGood {
   id: string;
@@ -251,7 +260,9 @@ export interface PurchasedGood {
   category: FoodSubCategory;
   is_food: boolean; // false if home goods/non-food
   notes?: string;
+  bbox?: BoundingBox;
 }
+
 
 export type ReceiptMatchStatus = "matched" | "unresolved" | "manual";
 
